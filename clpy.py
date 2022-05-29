@@ -3,35 +3,41 @@ import argparse
 import subprocess
 import re
 
-program_name="clpy"
-description="""Convert a CLI to a python module."""
-version="0.0.1"
+program_name = "clpy"
+description = """Convert a CLI to a python module."""
+version = "0.0.1"
+
 class reg:
     whitespace = re.compile("^\s")
-    word = re.compile("[A-Za-z0-9]+")
-    optional = re.compile("\[=?([A-Za-z0-9]+)\]")
-    # arg = re.compile("^\s+-(?:-)?([A-Za-z0-9\-]+)(?:\[?(=| )\[?([A-Za-z0-9\-<>]+)\]?(?:, |\s\s))?")
-    arg = re.compile("^\s+--?([A-Za-z0-9\-]+)" + # --switch
-                     "(?:\[?(=| )\[?([A-Za-z0-9\-<>]+)\]?" + #[=<optional>]
-                     ", |\s\s)?") # ensure ending whitespace
-    long_arg = re.compile("--([A-Za-z0-9\-]+)(?:(=| )([A-Za-z0-9\-<>]+))?")
+    ellipsis = re.compile("^ ?\.\.\.")
+    start_optional = re.compile("^ ?\[")
+    end_optional = re.compile("^ ?\]")
+    new_switch = re.compile("^\s+--?(?!-)([A-Za-z0-9\-]+)")
+    switch = re.compile("^--?([A-Za-z0-9\-]+)")
+    argument = re.compile("^(?: |=)?((?!-)[A-Za-z0-9\-<>#]+)")
+    equals = re.compile("^(=|\[=)")
+    comma = re.compile("^, ?")
+    stop = re.compile("^\s\s")
 
 class OptionMeta:
     def str(option):
         out = []
-        
-        # todo: do rjusts on on titles instead of manual spaces
+        just = 16
         if option.lines:
             out.append("'"+"'\n'".join(option.lines)+"'\n")
-        if option.opts:
-            out.append("options: "+option.opts)
-        if option.short_opt:
-            out.append("short:   "+str(option.short_opt.groups()))
-        if option.long_opt:
-            out.append("long:    "+str(option.long_opt.groups()))
-        tab = "".ljust(len("docs:    "), " ")
+        if option.usage:
+            out.append("usage:".ljust(just)+option.usage)
+            out.append("bad_match:".ljust(just)+str(option.bad_match))
+            out.append("equals: ".ljust(just)+str(option.wants_equals))
+        if option.switches:
+            out.append("switch:".ljust(just)+str([f.groups() for f in option.switches]))
+        if option.positional:
+            out.append("positional:".ljust(just)+str([f.groups() for f in option.positional]))
+        if option.optional:
+            out.append("optional:".ljust(just)+str([f.groups() for f in option.optional]))
+        tab = "".ljust(just, " ")
         if option.doc:
-            out.append("docs:    "+("\n"+tab).join(option.doc))
+            out.append("docs:".ljust(just)+("\n"+tab).join(option.doc))
         if out:
             out.append("}"+"".ljust(64, '-')+"{")
         return "\n".join(out)
@@ -39,13 +45,23 @@ class OptionMeta:
 
 class Option:
     lines = None
-    opts = None
-    short_opt = None
-    long_opt = None
     doc = None
+    usage = None
+    matches = None
+    positional = None
+    switches = None
+    optional = None
+    bad_match = False
+    wants_equals = False
+    depth = 0
+
     def __init__(self):
-        self.doc = []
         self.lines = []
+        self.doc = []
+        self.matches = []
+        self.positional = []
+        self.switches = []
+        self.optional = []
 
 def main():
     parser = argparse.ArgumentParser(prog=program_name, description=description)
@@ -53,40 +69,79 @@ def main():
     parser.add_argument("-c", "--command", required=True, help="the command to convert to a module")
     parser.add_argument("-t1", "--test1", help="complex arg for testing")
     parser.add_argument("-t2", "--test2", nargs=3, help="complex arg for testing")
-    parser.add_argument("-t3", "--test3", nargs="+",help="complex arg for testing")
-    parser.add_argument("-t4", "--test4", nargs="*",help="complex arg for testing")
+    parser.add_argument("-t3", "--test3", nargs="+", help="complex arg for testing")
+    parser.add_argument("-t4", "--test4", nargs="*", help="complex arg for testing")
+    parser.add_argument("-t5", "--test5", nargs=3, metavar=("1st","2nd", "3rd"), help="complex arg for testing")
+    
     args = parser.parse_args()
     help_text = subprocess.getoutput(args.command+" --help").split("\n")
-    cur_option = None
+    option = None
     header = []
     unused = []
     options = []
     for line in help_text:
-        match = reg.arg.search(line)
-        if match and reg.word.search(match.group(1)):
-            cur_option = Option()
-            options.append(cur_option)
-            cur_option.lines.append(line)
-            cur_option.short_opt = match
-            pos = match.span()[1]
-            match = reg.long_arg.search(line, pos)
-            cur_option.long_opt = match
-            if match:
-                pos = match.span()[1]
-            opts, doc = line[:pos], line[pos:]
-            if doc.strip():
-                cur_option.doc.append(doc.strip())
-            cur_option.opts = opts.strip()
-        elif cur_option and reg.whitespace.search(line):
-            cur_option.lines.append(line)
+        match = reg.new_switch.search(line)
+        if match:
+            option = Option()
+            options.append(option)
+            option.lines.append(line)
+            option.switches.append(match)
+            pos = 0
+            while(match):
+                option.matches.append(match)
+                pos += match.span()[1]
+                if not line[pos:]:
+                    break
+                last_match = match
+                match = None
+                match = reg.argument.search(line[pos:])
+                if match:
+                    if reg.equals.search(line[pos:]):
+                        option.wants_equals = True
+                    if option.depth == 0:
+                        option.positional.append(match)
+                    else:
+                        option.optional.append(match)
+                    continue
+                match = reg.switch.search(line[pos:])
+                if match:
+                    option.switches.append(match)
+                    continue
+                match = reg.start_optional.search(line[pos:])
+                if match:
+                    option.depth += 1
+                    continue
+                match = reg.end_optional.search(line[pos:])
+                if match:
+                    option.depth -= 1
+                    continue
+                match = reg.ellipsis.search(line[pos:])
+                if match:
+                    continue
+                match = reg.comma.search(line[pos:])
+                if match:
+                    continue
+                match = reg.stop.search(line[pos:])
+                if match:
+                    pos += match.span()[1]
+                    break
+                # Something went wrong.
+                # Reverting to last found switch.
+                pos = option.switches[-1].span()[1]
+                option.bad_match = True
+                break
+            usage, doc = line[:pos], line[pos:]
+            if doc.strip(): option.doc.append(doc.strip())
+            option.usage = usage.strip()
+        elif option and reg.whitespace.search(line):
+            option.lines.append(line)
             stripped = line.strip()
             if stripped:
-                cur_option.doc.append(stripped)
+                option.doc.append(stripped)
         elif not options:
             header.append(line)
         else:
-            # Note: This is potentially dangerous.
-            cur_option = None
+            option = None
             unused.append(line)
 
     print("\n".join(header))
