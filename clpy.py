@@ -12,9 +12,8 @@ class reg:
     ellipsis = re.compile("^ ?\.\.\.")
     start_optional = re.compile("^ ?\[")
     end_optional = re.compile("^ ?\]")
-    new_switch = re.compile("^\s+--?(?!-)([A-Za-z0-9\-]+)")
-    switch = re.compile("^--?([A-Za-z0-9\-]+)")
-    argument = re.compile("^(?: |=)?((?!-)[A-Za-z0-9\-<>#]+)")
+    switch = re.compile("^(?:\s+)?--?(?!-)([A-Za-z0-9\-]+)")
+    argument = re.compile("^(?: |=)?((?!-)[A-Za-z0-9\-<>#_]+)")
     equals = re.compile("^(=|\[=)")
     comma = re.compile("^, ?")
     stop = re.compile("^\s\s")
@@ -24,6 +23,7 @@ class OptionMeta:
         out = []
         just = 16
         if option.lines:
+            out.append("original line/s:")
             out.append("'"+"'\n'".join(option.lines)+"'\n")
         if option.usage:
             out.append("usage:".ljust(just)+option.usage)
@@ -80,8 +80,11 @@ def main():
     unused = []
     options = []
     for line in help_text:
-        match = reg.new_switch.search(line)
+        match = reg.switch.search(line)
         if match:
+            if option and not option.doc:
+                # Something went wrong, no doc for the last line.
+                option.bad_match = True
             option = Option()
             options.append(option)
             option.lines.append(line)
@@ -146,8 +149,17 @@ def main():
 
     print("\n".join(header))
     print("----------------")
+    print("bad matches:")
+    print("----------------")
     for o in options:
-        print(OptionMeta.str(o))
+        if o.bad_match:
+            print(OptionMeta.str(o))
+    print("----------------")
+    print("good matches:")
+    print("----------------")
+    for o in options:
+        if not o.bad_match:
+            print(OptionMeta.str(o))
     print("----------------")
     print("\n".join(unused))
 
