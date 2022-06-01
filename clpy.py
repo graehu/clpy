@@ -37,6 +37,8 @@ class OptionMeta:
             out.append("equals: ".ljust(just)+str(option.wants_equals))
         if option.switch:
             out.append("switch:".ljust(just)+str(option.switch.groups()[0]))
+        if option.nargs:
+            out.append("nargs:".ljust(just)+str(option.nargs))
         if option.positional:
             out.append("positional:".ljust(just)+", ".join([f.groups()[0] for f in option.positional]))
         if option.optional:
@@ -58,10 +60,12 @@ class Option:
     usage = None
     matches = None
     positional = None
+    nargs = None
     switch = None
     optional = None
     children = None
     bad_match = False
+    ellipsis = False
     wants_equals = False
     depth = 0
 
@@ -86,7 +90,6 @@ def main():
     parser.add_argument("-t6", "--test6", nargs="...", help="complex arg for testing")
     parser.add_argument("-t7", "--test7", nargs="A...", help="complex arg for testing")
     parser.add_argument("-t8", "--test8", choices=["1st", "2nd", "3rd"], help="complex arg for testing")
-
     
     args = parser.parse_args()
     help_text = subprocess.getoutput(args.command+" --help").split("\n")
@@ -106,6 +109,20 @@ def main():
             option.switch = match
             child = option
             pos = 0
+            def add_nargs(child):
+                if not child.optional and not child.ellipsis:
+                    child.nargs = str(len(child.positional))
+                elif len(child.optional) == 1 and not child.positional and not child.ellipsis:
+                    child.nargs = "?"
+                elif child.optional and not child.positional and child.ellipsis:
+                    child.nargs = "*"
+                elif child.optional and child.positional and child.ellipsis:
+                    child.nargs = "+"
+                elif not child.optional and not child.positional and child.ellipsis:
+                    child.nargs = "..."
+                elif not child.optional and child.positional and child.ellipsis:
+                    child.nargs = "A..."
+                    
             while(match):
                 child.matches.append(match)
                 pos += match.span()[1]
@@ -124,6 +141,7 @@ def main():
                     continue
                 match = reg.switch.search(line[pos:])
                 if match:
+                    add_nargs(child)
                     child = Option()
                     option.children.append(child)
                     child.switch = match
@@ -138,6 +156,7 @@ def main():
                     continue
                 match = reg.ellipsis.search(line[pos:])
                 if match:
+                    child.ellipsis = True
                     continue
                 match = reg.comma.search(line[pos:])
                 if match:
@@ -151,6 +170,7 @@ def main():
                 pos = option.switch.span()[1]
                 option.bad_match = True
                 break
+            add_nargs(child)
             usage, doc = line[:pos], line[pos:]
             if doc.strip(): option.doc.append(doc.strip())
             option.usage = usage.strip()
