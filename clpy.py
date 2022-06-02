@@ -12,10 +12,13 @@ class reg:
     ellipsis = re.compile("^ ?\.\.\.")
     start_optional = re.compile("^ ?\[")
     end_optional = re.compile("^ ?\]")
+    start_enum = re.compile("^ ?\{")
+    end_enum = re.compile("^ ?\}")
     switch = re.compile("^(?:\s+)?(--?(?!-)[A-Za-z0-9\-]+)")
     argument = re.compile("^(?: |=)?((?!-)[A-Za-z0-9\-<>#_]+)")
     equals = re.compile("^(=|\[=)")
     comma = re.compile("^, ?")
+    or_ = re.compile("^\| ?")
     stop = re.compile("^\s\s")
 
 class OptionMeta:
@@ -30,7 +33,8 @@ class OptionMeta:
             out.append("["+"".ljust(64,'-')+"]")
             out.append("original line/s:")
             out.append("'"+"'\n'".join(option.lines)+"'\n")
-            out.append("["+"stats".center(64,'-')+"]")
+            # out.append("["+"".center(64,'-')+"]")
+            # out.append("stats:")
         if option.usage:
             out.append("usage:".ljust(just)+option.usage)
             out.append("bad_match:".ljust(just)+str(option.bad_match))
@@ -40,9 +44,9 @@ class OptionMeta:
         if option.nargs:
             out.append("nargs:".ljust(just)+str(option.nargs))
         if option.positional:
-            out.append("positional:".ljust(just)+", ".join([f.groups()[0] for f in option.positional]))
+            out.append("positional:".ljust(just)+", ".join([f.groups()[0] if hasattr(f, "groups") else "enum" for f in option.positional]))
         if option.optional:
-            out.append("optional:".ljust(just)+str([f.groups()[0] for f in option.optional]))
+            out.append("optional:".ljust(just)+str([f.groups()[0] if hasattr(f, "groups") else "enum" for f in option.optional]))
         if option.children:
             out.append("["+"children".center(64,'-')+"]")
             out.extend([OptionMeta.str(c) for c in option.children])
@@ -63,11 +67,13 @@ class Option:
     nargs = None
     switch = None
     optional = None
+    enum = None
     children = None
     bad_match = False
     ellipsis = False
     wants_equals = False
-    depth = 0
+    option_depth = 0
+    enum_depth = 0
 
     def __init__(self):
         self.lines = []
@@ -77,6 +83,7 @@ class Option:
         self.positional = []
         self.optional = []
         self.children = []
+        self.enum = []
 
 def main():
     parser = argparse.ArgumentParser(prog=program_name, description=description)
@@ -134,7 +141,9 @@ def main():
                 if match:
                     if reg.equals.search(line[pos:]):
                         child.wants_equals = True
-                    if child.depth == 0:
+                    if child.enum_depth > 0:
+                      child.enum.append(match)
+                    elif child.option_depth == 0:
                         child.positional.append(match)
                     else:
                         child.optional.append(match)
@@ -148,11 +157,25 @@ def main():
                     continue
                 match = reg.start_optional.search(line[pos:])
                 if match:
-                    child.depth += 1
+                    child.option_depth += 1
                     continue
                 match = reg.end_optional.search(line[pos:])
                 if match:
-                    child.depth -= 1
+                    child.option_depth -= 1
+                    continue
+                match = reg.start_enum.search(line[pos:])
+                if match:
+                    child.enum_depth += 1
+                    continue
+                match = reg.end_enum.search(line[pos:])
+                if match:
+                    child.enum_depth -= 1
+                    if child.enum_depth == 0:
+                        if child.option_depth == 0:
+                            child.positional.append(child.enum)
+                        else:
+                            child.optional.append(child.enum)
+                        child.enum = []
                     continue
                 match = reg.ellipsis.search(line[pos:])
                 if match:
@@ -160,6 +183,13 @@ def main():
                     continue
                 match = reg.comma.search(line[pos:])
                 if match:
+                    continue
+                match = reg.or_.search(line[pos:])
+                if match:
+                    continue
+                match = reg.equals.search(line[pos:])
+                if match:
+                    child.wants_equals = True
                     continue
                 match = reg.stop.search(line[pos:])
                 if match:
@@ -186,19 +216,25 @@ def main():
             unused.append(line)
 
     print("\n".join(header))
-    print("----------------")
-    print("bad matches:")
-    print("----------------")
+    print("")
+    print("".ljust(64, "-"))
+    print(" bad matches ".center(64, "-"))
+    print("".ljust(64, "-"))
+    print("")
     for o in options:
         if o.bad_match:
             print(OptionMeta.str(o))
-    print("----------------")
-    print("good matches:")
-    print("----------------")
+    print("")
+    print("".ljust(64, "-"))
+    print(" good matches ".center(64, "-"))
+    print("".ljust(64, "-"))
+    print("")
     for o in options:
         if not o.bad_match:
             print(OptionMeta.str(o))
-    print("----------------")
+    print("")
+    print("".ljust(64, "-"))
+    print("")
     print("\n".join(unused))
 
 if __name__ == "__main__":
