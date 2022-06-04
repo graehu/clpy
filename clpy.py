@@ -32,7 +32,7 @@ class OptionMeta:
             out.append("["+name.center(64,'-')+"]")
             out.append("["+"".ljust(64,'-')+"]")
             out.append("original line/s:")
-            out.append("'\n'".join([f"line {n}: '{l}" for n, l in option.lines])+"'\n")
+            out.append("'\n".join([f"line {n}: '{l}" for n, l in option.lines])+"'\n")
         if option.usage:
             out.append("usage:".ljust(just)+option.usage)
             out.append("bad_match:".ljust(just)+str(option.bad_match))
@@ -81,6 +81,7 @@ class Option:
     nargs = None
     switch = None
     children = None
+    span = None
     bad_match = False
     ellipsis = False
     wants_equals = False
@@ -90,7 +91,6 @@ class Option:
     def __init__(self):
         self.lines = []
         self.doc = []
-        self.switch = ""
         self.matches = []
         self.children = []
         self.arguments = []
@@ -108,13 +108,14 @@ def parse(text, iterative=False):
         pos = 0
         while(line[pos:]):
             if match := reg.switch.search(line[pos:]):
-                start_pos = pos+match.span()[1]
+
                 if option and not option.doc:
                     # Not finding docs is a bad sign.
                     option.bad_match = True
                 option = Option()
                 options.append(option)
                 option.lines.append((line_num, line))
+                option.span = (pos+match.span(1)[0], pos+match.span(1)[1])
                 option.switch = match
                 child = option
                 argument = None
@@ -161,6 +162,7 @@ def parse(text, iterative=False):
                         child = Option()
                         option.children.append(child)
                         child.switch = match
+                        option.span = (pos, pos+match.span(1)[1])
 
                     # Handle brackets
                     elif match := reg.start_optional.search(line[pos:]): child.option_depth += 1
@@ -181,7 +183,7 @@ def parse(text, iterative=False):
                     if not match:
                         # Something went wrong.
                         # Reverting to start pos.
-                        pos = start_pos
+                        pos = option.span[1]
                         option.bad_match = True
                         break
                     
@@ -195,11 +197,18 @@ def parse(text, iterative=False):
                     pos = len(line)
                     
             elif option and reg.whitespace.search(line):
-                pos = len(line)
-                option.lines.append([line_num, line])
-                stripped = line.strip()
-                if stripped:
-                    option.doc.append(stripped)
+                # check if text starts past switch text
+                pos = len(line) - len(line.lstrip())
+                if pos > option.span[0]:
+                    pos = len(line)
+                    option.lines.append([line_num, line])
+                    stripped = line.strip()
+                    if stripped:
+                        option.doc.append(stripped)
+                else:
+                    pos = len(line)
+                    option = None
+                    unused.append(line)    
 
             elif not options:
                 pos = len(line)
@@ -209,7 +218,7 @@ def parse(text, iterative=False):
                 pos = len(line)
                 option = None
                 unused.append(line)
-                
+    
     return header, unused, options
         
 def main():
