@@ -32,7 +32,7 @@ class OptionMeta:
             out.append("["+name.center(64,'-')+"]")
             out.append("["+"".ljust(64,'-')+"]")
             out.append("original line/s:")
-            out.append("'"+"'\n'".join(option.lines)+"'\n")
+            out.append("'\n'".join([f"line {n}: '{l}" for n, l in option.lines])+"'\n")
         if option.usage:
             out.append("usage:".ljust(just)+option.usage)
             out.append("bad_match:".ljust(just)+str(option.bad_match))
@@ -114,7 +114,7 @@ def parse(text, iterative=False):
                     option.bad_match = True
                 option = Option()
                 options.append(option)
-                option.lines.append(line)
+                option.lines.append((line_num, line))
                 option.switch = match
                 child = option
                 argument = None
@@ -194,7 +194,7 @@ def parse(text, iterative=False):
                     
             elif option and reg.whitespace.search(line):
                 pos = len(line)
-                option.lines.append(line)
+                option.lines.append([line_num, line])
                 stripped = line.strip()
                 if stripped:
                     option.doc.append(stripped)
@@ -213,6 +213,8 @@ def parse(text, iterative=False):
 def main():
     parser = argparse.ArgumentParser(prog=program_name, description=description)
     parser.add_argument("command", help="the command to convert to a module")
+    parser.add_argument("-nb", "--no_bad_matches", action="store_true", help="don't display bad matches.")
+    parser.add_argument("--verbose", action="store_true", help="show unused text etc.")
     parser.add_argument("-v", "--version", action="version", version=version)
     parser.add_argument("-t1", "--test1", help="complex arg for testing")
     parser.add_argument("-t2", "--test2", nargs=3, metavar=("1st","2nd", "3rd"), help="complex arg for testing")
@@ -232,17 +234,19 @@ def main():
         print("".ljust(128, "="))
         print(f" {name} ".center(128, "="))
         print("".ljust(128, "="))
-        print("\n".join(header))
+        if args.verbose:
+            print("\n".join(header))
         print("")
-        print("".ljust(128, "-"))
-        print(" bad matches ".center(128, "-"))
-        print("".ljust(128, "-"))
-        print("")
-        for o in options:
-            if o.bad_match:
-                print(OptionMeta.str(o))
-                print("")
-        print("")
+        if not args.no_bad_matches:
+            print("".ljust(128, "-"))
+            print(" bad matches ".center(128, "-"))
+            print("".ljust(128, "-"))
+            print("")
+            for o in options:
+                if o.bad_match:
+                    print(OptionMeta.str(o))
+                    print("")
+            print("")
         print("".ljust(128, "-"))
         print(" good matches ".center(128, "-"))
         print("".ljust(128, "-"))
@@ -254,7 +258,8 @@ def main():
         print("")
         print("".ljust(64, "-"))
         print("")
-        print("\n".join(unused))
+        if args.verbose:
+            print("\n".join(unused))
 
 if __name__ == "__main__":
     main()
