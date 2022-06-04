@@ -42,7 +42,7 @@ class OptionMeta:
         if option.nargs:
             out.append("nargs:".ljust(just)+str(option.nargs))
         if option.arguments:
-            out.append("arguments:".ljust(just)+", ".join([f.tostr() for f in option.arguments]))
+            out.append("arguments:".ljust(just)+", ".join([f.to_str() for f in option.arguments]))
         if option.children:
             out.append("["+"children".center(64,'-')+"]")
             out.extend([OptionMeta.str(c) for c in option.children])
@@ -58,7 +58,7 @@ class Argument:
     wants_equals = False
     default = None
     choices = None
-    def tostr(self):
+    def to_str(self):
         out = ", ".join([m.groups()[0] for m in self.choices])
         if len(self.choices) > 1:
             out = "{"+out+"}"
@@ -120,18 +120,20 @@ def parse(text, iterative=False):
                 argument = None
                 
                 def add_nargs(child):
-                    if child.arguments:
-                        if not any([a.is_optional for a in child.arguments]) and not child.ellipsis:
-                            child.nargs = str(len(child.arguments))
-                        elif len(child.arguments) == 1 and child.arguments[0].is_optional and not child.ellipsis:
+                    args = child.arguments
+                    ellipsis = child.ellipsis
+                    if args:
+                        if not any([a.is_optional for a in args]) and not ellipsis:
+                            child.nargs = str(len(args))
+                        elif len(args) == 1 and args[0].is_optional and not ellipsis:
                             child.nargs = "?"
-                        elif all([a.is_optional for a in child.arguments]) and child.ellipsis:
+                        elif all([a.is_optional for a in args]) and ellipsis:
                             child.nargs = "*"
-                        elif not child.arguments[0].is_optional and all([a.is_optional for a in child.arguments[1:]]) and child.ellipsis:
+                        elif len(args) > 1 and not args[0].is_optional and all([a.is_optional for a in args[1:]]) and ellipsis:
                             child.nargs = "+"
-                        elif all([not a.is_optional for a in child.arguments]) and child.ellipsis:
+                        elif all([not a.is_optional for a in args]) and ellipsis:
                             child.nargs = "A..."
-                    elif child.ellipsis:
+                    elif ellipsis:
                         child.nargs = "..."
 
                 # Start searching for options etc.
@@ -149,7 +151,7 @@ def parse(text, iterative=False):
                         if argument and child.enum_depth != 0:
                             argument.choices.append(match)
                         else:
-                            argument = Argument(match, wants_equals=wants_equals, is_optional=child.option_depth !=0 )
+                            argument = Argument(match, wants_equals=wants_equals, is_optional=child.option_depth != 0)
                             child.arguments.append(argument)
                             argument = argument if child.enum_depth != 0 else None
                     
@@ -217,18 +219,20 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="show unused text etc.")
     parser.add_argument("-v", "--version", action="version", version=version)
     parser.add_argument("-t1", "--test1", help="complex arg for testing")
-    parser.add_argument("-t2", "--test2", nargs=3, metavar=("1st","2nd", "3rd"), help="complex arg for testing")
-    parser.add_argument("-t3", "--test3", nargs="+", help="complex arg for testing")
-    parser.add_argument("-t4", "--test4", nargs="*", help="complex arg for testing")
-    parser.add_argument("-t5", "--test5", nargs="?", help="complex arg for testing")
-    parser.add_argument("-t6", "--test6", nargs="...", help="complex arg for testing")
-    parser.add_argument("-t7", "--test7", nargs="A...", help="complex arg for testing")
-    parser.add_argument("-t8", "--test8", choices=["1st", "2nd", "3rd"], help="complex arg for testing")
+    parser.add_argument("-t2", "--test2", nargs=3, metavar=("1st","2nd", "3rd"), help="test: nargs should be 3")
+    parser.add_argument("-t3", "--test3", nargs="+", help="test: nargs should be +")
+    parser.add_argument("-t4", "--test4", nargs="*", help="test: nargs should be *")
+    parser.add_argument("-t5", "--test5", nargs="?", help="test: nargs should be ?")
+    parser.add_argument("-t6", "--test6", nargs="...", help="test: nargs should be ...")
+    parser.add_argument("-t7", "--test7", nargs="A...", help="test: nargs should be A...")
+    parser.add_argument("-t8", "--test8", choices=["1st", "2nd", "3rd"], help="test: there should be 3 choices")
     
     args = parser.parse_args()
     help_text = subprocess.getoutput(args.command+" --help").split("\n")
     man_text = subprocess.getoutput("man -P cat "+args.command).split("\n")
 
+    command = Command()
+    
     parsed = [(*parse(help_text), "help"), (*parse(man_text), "man")]
     for header, unused, options, name in parsed:
         print("".ljust(128, "="))
