@@ -8,14 +8,15 @@ description = """Convert a CLI to a python module."""
 version = "0.0.1"
 
 class reg:
+    usage = re.compile("^(usage: )", re.IGNORECASE)
     whitespace = re.compile("^\s")
     ellipsis = re.compile("^ ?\.\.\.")
     start_optional = re.compile("^ ?\[")
     end_optional = re.compile("^ ?\]")
     start_enum = re.compile("^ ?\{")
     end_enum = re.compile("^ ?\}")
-    switch = re.compile("^(?:\s+)?(--?(?!-)[A-Za-z0-9\-#]+)")
-    argument = re.compile("^(?: |=)?((?!-)[A-Za-z0-9\-<>#_]+)")
+    switch = re.compile("^(?:\s+)?(--?(?!-)[A-Za-z0-9\-#_]+)")
+    argument = re.compile("^(?: |=)?((?!-)<?[A-Za-z0-9\-#_]+>?)")
     equals = re.compile("^(=|\[=)")
     comma = re.compile("^, ?")
     or_ = re.compile("^\| ?")
@@ -95,23 +96,58 @@ class Option:
         self.children = []
         self.arguments = []
 
+class Usage:
+    match = None
+    lines = None
 
+    def __init__(self):
+        self.lines = []
 
 def parse(text, iterative=False):
+    
+    # Parse usage    
+    usage = None
+    line_num = 0
+    
+    # only checking the first 8 lines.
+    for line in text[:8]:
+        line_num += 1
+        if not usage:
+            match = reg.usage.search(line)
+            
+        if  not usage and match:
+            usage = Usage()
+            usage.match = match
+            usage.lines.append((line_num, line))
+            pos = len(line)
+
+        elif (usage and len(line.lstrip()) > usage.match.span()[1]
+              and usage.lines[-1][0] == line_num -1):
+            usage.lines.append((line_num, line))
+
+        else:
+            break
+    
+    if not usage:
+        line_num = 0
+
+    # Parse Options
     option = None
-    header = []
+    prologue = []
     unused = []
     options = []
-    line_num = 0
-    for line in text:
+    
+    for line in text[line_num:]:
         line_num += 1
         pos = 0
         while(line[pos:]):
+                
             if match := reg.switch.search(line[pos:]):
-
+                
+                # Not finding docs is a bad sign.
                 if option and not option.doc:
-                    # Not finding docs is a bad sign.
                     option.bad_match = True
+                    
                 option = Option()
                 options.append(option)
                 option.lines.append((line_num, line))
@@ -162,7 +198,7 @@ def parse(text, iterative=False):
                         child = Option()
                         option.children.append(child)
                         child.switch = match
-                        option.span = (pos, pos+match.span(1)[1])
+                        child.span = (pos, pos+match.span(1)[1])
 
                     # Handle brackets
                     elif match := reg.start_optional.search(line[pos:]): child.option_depth += 1
@@ -170,7 +206,6 @@ def parse(text, iterative=False):
                     elif match := reg.start_enum.search(line[pos:]): child.enum_depth += 1
                     elif match := reg.end_enum.search(line[pos:]): child.enum_depth -= 1
                            
-                    
                     # Handle syntactic sugar
                     elif match := reg.ellipsis.search(line[pos:]): child.ellipsis = True
                     elif match := reg.equals.search(line[pos:]): child.wants_equals = True
@@ -188,9 +223,9 @@ def parse(text, iterative=False):
                         break
                     
                 add_nargs(child)
-                usage, doc = line[:pos], line[pos:]
+                opt_usage, doc = line[:pos], line[pos:]
                 if doc.strip(): option.doc.append(doc.strip())
-                option.usage = usage.strip()
+                option.usage = opt_usage.strip()
                 if not option.bad_match:
                     pos = len(line)
                 elif not iterative:
@@ -212,14 +247,14 @@ def parse(text, iterative=False):
 
             elif not options:
                 pos = len(line)
-                header.append(line)
+                prologue.append(line)
                 
             else:
                 pos = len(line)
                 option = None
                 unused.append(line)
     
-    return header, unused, options
+    return prologue, unused, options, usage
         
 def main():
     parser = argparse.ArgumentParser(prog=program_name, description=description)
@@ -243,12 +278,17 @@ def main():
     command = Command()
     
     parsed = [(*parse(help_text), "help"), (*parse(man_text), "man")]
-    for header, unused, options, name in parsed:
+    for prologue, unused, options, usage, name in parsed:
         print("".ljust(128, "="))
         print(f" {name} ".center(128, "="))
         print("".ljust(128, "="))
-        if args.verbose:
-            print("\n".join(header))
+        if args.verbose and usage:
+            print(" usage ".center(64, "_"))
+            print("\n".join([f"line {n}: {l}" for n, l in usage.lines]))
+        print("")
+        if args.verbose and prologue:
+            print(" prologue ".center(64, "_"))
+            print("\n".join(prologue))
         print("")
         if not args.no_bad_matches:
             print("".ljust(128, "-"))
