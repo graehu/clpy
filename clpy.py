@@ -68,8 +68,8 @@ class Argument:
         return out
             
     def __init__(self, match, is_optional = False, wants_equals = False):
-        self.wants_equals = wants_equals
         self.is_optional = is_optional
+        self.wants_equals = wants_equals
         self.match = match
         self.choices = [match]
     
@@ -160,7 +160,7 @@ def parse_option(line, pos, line_num, match):
             if argument and child.enum_depth != 0:
                 argument.choices.append(match)
             else:
-                argument = Argument(match, wants_equals, child.option_depth != 0)
+                argument = Argument(match, child.option_depth != 0, wants_equals)
                 child.arguments.append(argument)
                 argument = argument if child.enum_depth != 0 else None
 
