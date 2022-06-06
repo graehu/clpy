@@ -8,7 +8,7 @@ description = """Convert a CLI to a python module."""
 version = "0.0.1"
 
 class reg:
-    usage = re.compile("^(usage: )", re.IGNORECASE)
+    usage = re.compile("^(?:usage:) ([A-Z0-9]+)\s+", re.IGNORECASE)
     whitespace = re.compile("^\s")
     ellipsis = re.compile("^ ?\.\.\.")
     start_optional = re.compile("^ ?\[")
@@ -19,7 +19,7 @@ class reg:
     argument = re.compile("^(?: |=)?((?!-)<?[A-Za-z0-9\-#_]+>?)")
     equals = re.compile("^(=|\[=)")
     comma = re.compile("^, ?")
-    or_ = re.compile("^\| ?")
+    or_ = re.compile("^(?: ?\|) ?")
     stop = re.compile("^\s\s")
 
 class OptionMeta:
@@ -36,8 +36,8 @@ class OptionMeta:
             out.append("'\n".join([f"line {n}: '{l}" for n, l in option.lines])+"'\n")
         if option.usage:
             out.append("usage:".ljust(just)+option.usage)
-            out.append("bad_match:".ljust(just)+str(option.bad_match))
-            out.append("equals: ".ljust(just)+str(option.wants_equals))
+            if option.bad_match: out.append("bad_match:".ljust(just)+str(option.bad_match))
+            if option.wants_equals: out.append("equals: ".ljust(just)+str(option.wants_equals))
         if option.switch:
             out.append("switch:".ljust(just)+str(option.switch.groups()[0]))
         if option.nargs:
@@ -81,6 +81,7 @@ class Option:
     matches = None
     nargs = None
     switch = None
+    parent = None
     children = None
     span = None
     bad_match = False
@@ -98,38 +99,171 @@ class Option:
 
 class Usage:
     match = None
+    matches = None
+    options = None
+    positional = None
     lines = None
 
     def __init__(self):
         self.lines = []
+        self.matches = []
+        self.options = []
+        self.positional = []
+
+        
+        
+def option_add_nargs(option):
+    args = option.arguments
+    ellipsis = option.ellipsis
+    if args:
+        if not any([a.is_optional for a in args]) and not ellipsis:
+            option.nargs = str(len(args))
+        elif len(args) == 1 and args[0].is_optional and not ellipsis:
+            option.nargs = "?"
+        elif all([a.is_optional for a in args]) and ellipsis:
+            option.nargs = "*"
+        elif len(args) > 1 and not args[0].is_optional and all([a.is_optional for a in args[1:]]) and ellipsis:
+            option.nargs = "+"
+        elif all([not a.is_optional for a in args]) and ellipsis:
+            option.nargs = "A..."
+    elif ellipsis:
+        option.nargs = "..."
+
+
+def parse_option(line, pos, line_num, match):
+    option = Option()
+    option.lines.append((line_num, line))
+    option.span = (pos + match.span(1)[0], pos + match.span(1)[1])
+    option.switch = match
+    child = option
+    argument = None
+
+    # Start searching for options etc.
+    while(match):
+
+        # Check to see if we've moved out of scope
+        if child.option_depth < 0: break
+        if child.enum_depth < 0: break
+
+        child.matches.append(match)
+        pos += match.span()[1]
+
+        # Are we done?
+        if not line[pos:]: break
+
+        # Handle arguments
+        if match := reg.argument.search(line[pos:]):
+
+            if wants_equals := bool(reg.equals.search(line[pos:])):
+                child.wants_equals = True
+
+            if argument and child.enum_depth != 0:
+                argument.choices.append(match)
+            else:
+                argument = Argument(match, wants_equals, child.option_depth != 0)
+                child.arguments.append(argument)
+                argument = argument if child.enum_depth != 0 else None
+
+        # Handle child options
+        elif match := reg.switch.search(line[pos:]):
+            option_add_nargs(child)
+            child = Option()
+            option.children.append(child)
+            child.parent = option
+            child.switch = match
+            child.span = (pos, pos+match.span(1)[1])
+
+        # Handle brackets
+        elif match := reg.start_optional.search(line[pos:]): child.option_depth += 1
+        elif match := reg.end_optional.search(line[pos:]): child.option_depth -= 1
+        elif match := reg.start_enum.search(line[pos:]): child.enum_depth += 1
+        elif match := reg.end_enum.search(line[pos:]): child.enum_depth -= 1
+
+        # Handle syntactic sugar
+        elif match := reg.ellipsis.search(line[pos:]): child.ellipsis = True
+        elif match := reg.equals.search(line[pos:]): child.wants_equals = True
+        elif match := reg.comma.search(line[pos:]): pass
+        elif match := reg.or_.search(line[pos:]): pass
+        elif match := reg.stop.search(line[pos:]):
+            pos += match.span()[1]
+            break
+
+        if not match:
+            # Something went wrong.
+            # Reverting to start pos.
+            pos = option.span[1]
+            option.bad_match = True
+            break
+
+    option_add_nargs(child)
+    opt_usage, doc = line[option.span[0]:pos], line[pos:]
+    if doc.strip(): option.doc.append(doc.strip())
+    option.usage = opt_usage.strip()
+
+    return option, pos
+    
 
 def parse(text, iterative=False):
     
     # Parse usage    
     usage = None
     line_num = 0
+    argument = None
     
-    # only checking the first 8 lines.
-    for line in text[:8]:
+    # Only checking the first 32 lines.
+    for line in text[:32]:
         line_num += 1
-        if not usage:
-            match = reg.usage.search(line)
-            
-        if  not usage and match:
-            usage = Usage()
-            usage.match = match
-            usage.lines.append((line_num, line))
-            pos = len(line)
-
-        elif (usage and len(line.lstrip()) > usage.match.span()[1]
+        pos = 0
+        if not usage and (not (match := reg.usage.search(line[pos:]))):
+            continue
+        
+        if match or (usage and len(line)-len(line.lstrip()) >= usage.match.span()[1]
               and usage.lines[-1][0] == line_num -1):
-            usage.lines.append((line_num, line))
+            
+            if not usage:
+                usage = Usage()
+                usage.match = match
+            else:
+                match = usage.match
 
+            usage.lines.append((line_num, line))
+            
+            while(line[pos:]):
+                if match:
+                    pos += match.span()[1]
+                    usage.matches.append(match)
+                
+                # Handle options and arguments
+                if match := reg.switch.search(line[pos:]):
+                    option, pos = parse_option(line, pos, line_num, match)
+                    option.doc = None
+                    usage.options.append(option)
+                    match = None
+                    
+                elif match := reg.argument.search(line[pos:]):
+                    usage.positional.append(match)
+
+                # Handle outer brackets
+                elif match := reg.start_optional.search(line[pos:]): pass
+                elif match := reg.end_optional.search(line[pos:]): pass
+                elif match := reg.start_enum.search(line[pos:]): pass
+                elif match := reg.end_enum.search(line[pos:]): pass
+                
+                # Handle syntactic sugar
+                elif match := reg.ellipsis.search(line[pos:]): pass
+                elif match := reg.comma.search(line[pos:]): pass
+                elif match := reg.or_.search(line[pos:]): pass
+                else:
+                    if line[pos:]:
+                        print("premature break: "+line[pos:])
+                    break
         else:
             break
-    
+
     if not usage:
         line_num = 0
+    else:
+        line_num -= 1
 
     # Parse Options
     option = None
@@ -143,93 +277,19 @@ def parse(text, iterative=False):
         while(line[pos:]):
                 
             if match := reg.switch.search(line[pos:]):
-                
                 # Not finding docs is a bad sign.
                 if option and not option.doc:
                     option.bad_match = True
-                    
-                option = Option()
+
+                option, pos = parse_option(line, pos, line_num, match)
                 options.append(option)
-                option.lines.append((line_num, line))
-                option.span = (pos+match.span(1)[0], pos+match.span(1)[1])
-                option.switch = match
-                child = option
-                argument = None
                 
-                def add_nargs(child):
-                    args = child.arguments
-                    ellipsis = child.ellipsis
-                    if args:
-                        if not any([a.is_optional for a in args]) and not ellipsis:
-                            child.nargs = str(len(args))
-                        elif len(args) == 1 and args[0].is_optional and not ellipsis:
-                            child.nargs = "?"
-                        elif all([a.is_optional for a in args]) and ellipsis:
-                            child.nargs = "*"
-                        elif len(args) > 1 and not args[0].is_optional and all([a.is_optional for a in args[1:]]) and ellipsis:
-                            child.nargs = "+"
-                        elif all([not a.is_optional for a in args]) and ellipsis:
-                            child.nargs = "A..."
-                    elif ellipsis:
-                        child.nargs = "..."
-
-                # Start searching for options etc.
-                while(match):
-                    child.matches.append(match)
-                    pos += match.span()[1]
-                    if not line[pos:]: break
-                    
-                    # Handle arguments
-                    if match := reg.argument.search(line[pos:]):
-
-                        if wants_equals := bool(reg.equals.search(line[pos:])):
-                            child.wants_equals = True
-
-                        if argument and child.enum_depth != 0:
-                            argument.choices.append(match)
-                        else:
-                            argument = Argument(match, wants_equals=wants_equals, is_optional=child.option_depth != 0)
-                            child.arguments.append(argument)
-                            argument = argument if child.enum_depth != 0 else None
-                    
-                    # Handle child options
-                    elif match := reg.switch.search(line[pos:]):
-                        add_nargs(child)
-                        child = Option()
-                        option.children.append(child)
-                        child.switch = match
-                        child.span = (pos, pos+match.span(1)[1])
-
-                    # Handle brackets
-                    elif match := reg.start_optional.search(line[pos:]): child.option_depth += 1
-                    elif match := reg.end_optional.search(line[pos:]): child.option_depth -= 1
-                    elif match := reg.start_enum.search(line[pos:]): child.enum_depth += 1
-                    elif match := reg.end_enum.search(line[pos:]): child.enum_depth -= 1
-                           
-                    # Handle syntactic sugar
-                    elif match := reg.ellipsis.search(line[pos:]): child.ellipsis = True
-                    elif match := reg.equals.search(line[pos:]): child.wants_equals = True
-                    elif match := reg.comma.search(line[pos:]): pass
-                    elif match := reg.or_.search(line[pos:]): pass
-                    elif match := reg.stop.search(line[pos:]):
-                        pos += match.span()[1]
-                        break
-                    
-                    if not match:
-                        # Something went wrong.
-                        # Reverting to start pos.
-                        pos = option.span[1]
-                        option.bad_match = True
-                        break
-                    
-                add_nargs(child)
-                opt_usage, doc = line[:pos], line[pos:]
-                if doc.strip(): option.doc.append(doc.strip())
-                option.usage = opt_usage.strip()
                 if not option.bad_match:
                     pos = len(line)
                 elif not iterative:
                     pos = len(line)
+                    
+
                     
             elif option and reg.whitespace.search(line):
                 # check if text starts past switch text
@@ -262,7 +322,9 @@ def main():
     parser.add_argument("-nb", "--no_bad_matches", action="store_true", help="don't display bad matches.")
     parser.add_argument("--verbose", action="store_true", help="show unused text etc.")
     parser.add_argument("-v", "--version", action="version", version=version)
-    parser.add_argument("-t1", "--test1", help="complex arg for testing")
+    # Tests
+    # todo: make these self verifying.
+    parser.add_argument("-t1", "--test1", help="test: default argparse arg for test")
     parser.add_argument("-t2", "--test2", nargs=3, metavar=("1st","2nd", "3rd"), help="test: nargs should be 3")
     parser.add_argument("-t3", "--test3", nargs="+", help="test: nargs should be +")
     parser.add_argument("-t4", "--test4", nargs="*", help="test: nargs should be *")
@@ -283,13 +345,16 @@ def main():
         print(f" {name} ".center(128, "="))
         print("".ljust(128, "="))
         if args.verbose and usage:
-            print(" usage ".center(64, "_"))
+            print(" usage ".center(128, "_"))
             print("\n".join([f"line {n}: {l}" for n, l in usage.lines]))
+            for option in usage.options:
+                print(OptionMeta.str(option))
         print("")
         if args.verbose and prologue:
-            print(" prologue ".center(64, "_"))
+            print(" prologue ".center(128, "_"))
             print("\n".join(prologue))
         print("")
+        print(" options ".center(128, "_"))
         if not args.no_bad_matches:
             print("".ljust(128, "-"))
             print(" bad matches ".center(128, "-"))
