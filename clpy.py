@@ -2,6 +2,7 @@
 import argparse
 import subprocess
 import re
+import test
 
 program_name = "clpy"
 description = """Convert a CLI to a python module."""
@@ -28,9 +29,7 @@ class OptionMeta:
         just = 16
         if option.lines:
             out.append("["+"".ljust(64,'-')+"]")
-            name = max([option.switch.groups()[0], *[c.switch.groups()[0] for c in option.children]], key=len)
-            name = " "+name.strip('-')+" "
-            out.append("["+name.center(64,'-')+"]")
+            out.append("["+option.name.center(64,'-')+"]")
             out.append("["+"".ljust(64,'-')+"]")
             out.append("original line/s:")
             out.append("'\n".join([f"line {n}: '{l}" for n, l in option.lines])+"'\n")
@@ -54,6 +53,54 @@ class OptionMeta:
             out.append("["+"".ljust(64,'-')+"]")
         return "\n".join(out)
 
+def debug_print(prologue, unused, options, usage, name, verbose, no_bad_matches):
+    print("".ljust(128, "="))
+    print(f" {name} ".center(128, "="))
+    print("".ljust(128, "="))
+    if verbose and usage:
+        print(" usage ".center(128, "_"))
+        print("\n".join([f"line {n}: {l}" for n, l in usage.lines]))
+        for option in usage.options:
+            print(OptionMeta.str(option))
+    print("")
+    if verbose and prologue:
+        print(" prologue ".center(128, "_"))
+        print("\n".join(prologue))
+    print("")
+    print(" options ".center(128, "_"))
+    if not no_bad_matches:
+        print("".ljust(128, "-"))
+        print(" bad matches ".center(128, "-"))
+        print("".ljust(128, "-"))
+        print("")
+        for o in options:
+            if o.bad_match:
+                print(OptionMeta.str(o))
+                print("")
+        print("")
+    print("".ljust(128, "-"))
+    print(" good matches ".center(128, "-"))
+    print("".ljust(128, "-"))
+    print("")
+    for o in options:
+        if not o.bad_match:
+            print(OptionMeta.str(o))
+            print("")
+    print("")
+    print("".ljust(64, "-"))
+    print("")
+    if verbose:
+        print("\n".join(unused))
+
+class Command:
+    name = ""
+    usage = ""
+    options = None
+    
+    def __init__(self):
+        options = []
+        pass
+    
 class Argument:
     is_optional = False # else is positional
     wants_equals = False
@@ -74,6 +121,8 @@ class Argument:
         self.choices = [match]
     
 class Option:
+    x = y = "test1"
+    name = None
     lines = None
     doc = None
     usage = None
@@ -199,7 +248,8 @@ def parse_option(line, pos, line_num, match):
     opt_usage, doc = line[option.span[0]:pos], line[pos:]
     if doc.strip(): option.doc.append(doc.strip())
     option.usage = opt_usage.strip()
-
+    option.name = max([c.switch.group(1).lstrip('-') for c in [option, *option.children]], key=len)
+    option.name = option.name.replace("-", "_")
     return option, pos
     
 
@@ -289,8 +339,6 @@ def parse(text, iterative=False):
                 elif not iterative:
                     pos = len(line)
                     
-
-                    
             elif option and reg.whitespace.search(line):
                 # check if text starts past switch text
                 pos = len(line) - len(line.lstrip())
@@ -315,7 +363,8 @@ def parse(text, iterative=False):
                 unused.append(line)
     
     return prologue, unused, options, usage
-        
+
+
 def main():
     parser = argparse.ArgumentParser(prog=program_name, description=description)
     parser.add_argument("command", help="the command to convert to a module")
@@ -338,46 +387,53 @@ def main():
     man_text = subprocess.getoutput("man -P cat "+args.command).split("\n")
 
     command = Command()
-    
-    parsed = [(*parse(help_text), "help"), (*parse(man_text), "man")]
+    arg_fmt = "{arg}={default}"
+    prop_fmt = "{prop} = {default}"
+    class_fmt = """
+class {cmd}cli:
+    \"\"\"
+{doc}
+    \"\"\"
+        
+{props}
+
+    def __init__(self, {args}):
+        pass
+
+    def run(self):
+        pass
+    """
+
+    parsed = [(*parse(help_text), "help")]# , (*parse(man_text), "man")]
     for prologue, unused, options, usage, name in parsed:
-        print("".ljust(128, "="))
-        print(f" {name} ".center(128, "="))
-        print("".ljust(128, "="))
-        if args.verbose and usage:
-            print(" usage ".center(128, "_"))
-            print("\n".join([f"line {n}: {l}" for n, l in usage.lines]))
-            for option in usage.options:
-                print(OptionMeta.str(option))
-        print("")
-        if args.verbose and prologue:
-            print(" prologue ".center(128, "_"))
-            print("\n".join(prologue))
-        print("")
-        print(" options ".center(128, "_"))
-        if not args.no_bad_matches:
-            print("".ljust(128, "-"))
-            print(" bad matches ".center(128, "-"))
-            print("".ljust(128, "-"))
-            print("")
-            for o in options:
-                if o.bad_match:
-                    print(OptionMeta.str(o))
-                    print("")
-            print("")
-        print("".ljust(128, "-"))
-        print(" good matches ".center(128, "-"))
-        print("".ljust(128, "-"))
-        print("")
-        for o in options:
-            if not o.bad_match:
-                print(OptionMeta.str(o))
-                print("")
-        print("")
-        print("".ljust(64, "-"))
-        print("")
-        if args.verbose:
-            print("\n".join(unused))
+        if False:
+            debug_print(prologue, unused, options, usage, name, args.verbose, args.no_bad_matches)
+        options = [o for o in options if not o.bad_match and not o.name in ["help", "version"]]
+        options = [o for o in options if len(o.name) > 2]
+        max_name = max([len(o.name+":  ") for o in options])+4
+        # doc = ["init params:", "".rjust(8).ljust(max_name*2, "-")+"\n"]
+        doc = []
+        doc.extend(["".rjust(4)+f"{o.name}: " for o in options])
+        doc = zip(doc, options)
+        # todo: 
+        doc = [n.ljust(max_name)+"\n".ljust(max_name+1).join(o.doc) for n, o in doc]
+        doc  = "\n".join(doc)+"\n"
+        props = []
+        props.extend(["".rjust(4)+f"{o.name} = None" for o in options])
+        # props = zip(props, options)
+        # props = [n.ljust(max_name)+"".join(o.doc) for n, o in props]
+        props  = "\n".join(props)+"\n"
+        args = []
+        args.extend([f"{o.name} = None" for o in options])
+        args = [a+", " if a != args[-1] else a for a in args]
+        args = [args[a]+"\n".ljust(18) if a%4 == 3 else args[a] for a in range(0, len(args))]
+        args = "".join(args)
+        import os
+        cmd = usage.match.groups()[0]
+        os.makedirs(cmd+"cli", exist_ok=True)
+        init = class_fmt.format(cmd=cmd, doc=doc, props=props, args=args)
+        with open(cmd+"cli/__init__.py", "w") as out:
+            out.write(init)
 
 if __name__ == "__main__":
     main()
