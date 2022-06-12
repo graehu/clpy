@@ -2,7 +2,10 @@
 import argparse
 import subprocess
 import re
-import test
+import os
+import keyword
+import builtins
+import pickle
 
 program_name = "clpy"
 description = """Convert a CLI to a python module."""
@@ -121,7 +124,6 @@ class Argument:
         self.choices = [match]
     
 class Option:
-    x = y = "test1"
     name = None
     lines = None
     doc = None
@@ -145,6 +147,14 @@ class Option:
         self.matches = []
         self.children = []
         self.arguments = []
+        pass
+
+    def to_dict(self):
+        return {
+            "switch": max([c.switch.group(1) for c in [self, *self.children]], key=len),
+            "nargs": self.nargs,
+            "wants_equals": self.wants_equals
+        }
 
 class Usage:
     match = None
@@ -250,8 +260,9 @@ def parse_option(line, pos, line_num, match):
     option.usage = opt_usage.strip()
     option.name = max([c.switch.group(1).lstrip('-') for c in [option, *option.children]], key=len)
     option.name = option.name.replace("-", "_")
+    if option.name in keyword.kwlist: option.name = option.name+"_"
+    if option.name in dir(builtins): option.name = option.name+"_"
     return option, pos
-    
 
 def parse(text, iterative=False):
     
@@ -384,13 +395,17 @@ def main():
     
     args = parser.parse_args()
     help_text = subprocess.getoutput(args.command+" --help").split("\n")
-    man_text = subprocess.getoutput("man -P cat "+args.command).split("\n")
+    # man_text = subprocess.getoutput("man -P cat "+args.command).split("\n")
+    # todo: It might be better to have a base class + kwargs
+    class_fmt = """# clpy generated, do not modify by hand
+import subprocess
+import pickle
+import os
 
-    command = Command()
-    arg_fmt = "{arg}={default}"
-    prop_fmt = "{prop} = {default}"
-    class_fmt = """
-class {cmd}cli:
+curdir = os.path.dirname(__file__)
+options = pickle.load(open(os.path.join(curdir, "options.pkl"), "rb"))
+
+class cli_{cmd}:
     \"\"\"
 {doc}
     \"\"\"
@@ -398,9 +413,24 @@ class {cmd}cli:
 {props}
 
     def __init__(self, {args}):
+        args = locals()
+        for k in args:
+            if args[k] and hasattr(self, k):
+                setattr(self, k, args[k])
         pass
 
     def run(self):
+        args = ["{cmd}"]
+        for k in options:
+            val = getattr(self, k, None)
+            if val:
+                join = "=" if options[k]["wants_equals"] else " "
+                if isinstance(val, bool):
+                    args.append(options[k]["switch"])
+                else:
+                    args.append(options[k]["switch"]+join+str(val))
+        print(args)
+        subprocess.run(args)
         pass
     """
 
@@ -408,32 +438,52 @@ class {cmd}cli:
     for prologue, unused, options, usage, name in parsed:
         if False:
             debug_print(prologue, unused, options, usage, name, args.verbose, args.no_bad_matches)
-        options = [o for o in options if not o.bad_match and not o.name in ["help", "version"]]
+        
+        # Filter out bad options etc.
+        options = [o for o in options if not o.bad_match and not o.name.rstrip("_") in ["help", "version"]]
         options = [o for o in options if len(o.name) > 2]
-        max_name = max([len(o.name+":  ") for o in options])+4
-        # doc = ["init params:", "".rjust(8).ljust(max_name*2, "-")+"\n"]
+        options_dict = {}
+        for o in options:
+            if o.name not in options_dict:
+                options_dict[o.name] = o
+        options = [o for o in options_dict.values()]
+        option_dict = {o.name: o.to_dict() for o in options}
+        
+        # Generate options.pkl
+        cmd = usage.match.groups()[0]
+        os.makedirs(f"cli_{cmd}", exist_ok=True)
+        pickle.dump(option_dict, open(f"cli_{cmd}/options.pkl", "wb"))
+        
+        # Generate docs
+        tab = 4
+        max_name = max([len(o.name+":  ") for o in options])+tab
         doc = []
-        doc.extend(["".rjust(4)+f"{o.name}: " for o in options])
+        doc.extend(["".rjust(tab)+f"{o.name}: " for o in options])
         doc = zip(doc, options)
-        # todo: 
         doc = [n.ljust(max_name)+"\n".ljust(max_name+1).join(o.doc) for n, o in doc]
         doc  = "\n".join(doc)+"\n"
+        
+        # Generate props
+        split = 4
         props = []
-        props.extend(["".rjust(4)+f"{o.name} = None" for o in options])
-        # props = zip(props, options)
-        # props = [n.ljust(max_name)+"".join(o.doc) for n, o in props]
-        props  = "\n".join(props)+"\n"
+        props.extend([f"{o.name}" for o in options])
+        props = [a+"=" for a in props]
+        props = [props[a]+"None\n"+"".ljust(4) if a%split == split-1 else props[a] for a in range(0, len(props))]
+        props.append("None" if len(props)%split != 0 else "")
+        props = "    "+"".join(props)
+        
+        # Generate init args
         args = []
         args.extend([f"{o.name} = None" for o in options])
         args = [a+", " if a != args[-1] else a for a in args]
-        args = [args[a]+"\n".ljust(18) if a%4 == 3 else args[a] for a in range(0, len(args))]
+        args = [args[a]+"\n".ljust(18) if a%split == split-1 else args[a] for a in range(0, len(args))]
         args = "".join(args)
-        import os
-        cmd = usage.match.groups()[0]
-        os.makedirs(cmd+"cli", exist_ok=True)
+        # 
         init = class_fmt.format(cmd=cmd, doc=doc, props=props, args=args)
-        with open(cmd+"cli/__init__.py", "w") as out:
-            out.write(init)
+        open(f"cli_{cmd}/__init__.py", "w").write(init)
+        
+        from cli_ls import cli_ls as ls
+        ls(almost_all=True, color=True).run()
 
 if __name__ == "__main__":
     main()
