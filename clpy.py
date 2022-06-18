@@ -19,7 +19,8 @@ class reg:
     end_optional = re.compile("^ ?\]")
     start_enum = re.compile("^ ?\{")
     end_enum = re.compile("^ ?\}")
-    switch = re.compile("^(?:\s+)?(--?(?!-)[A-Za-z0-9\-#_]+)")
+    switch = re.compile("^(?:\s+)?(--?[A-Za-z0-9\-#_]+)")
+    has_arg = re.compile("^\s{2,8}(?!---)(-{0,2}[A-Z])", re.IGNORECASE)
     argument = re.compile("^(?: |=)?((?!-)<?[A-Za-z0-9\-#_]+>?)")
     equals = re.compile("^(=|\[=)")
     comma = re.compile("^, ?")
@@ -336,19 +337,30 @@ def parse(text, iterative=False):
         line_num += 1
         pos = 0
         while(line[pos:]):
-                
-            if match := reg.switch.search(line[pos:]):
-                # Not finding docs is a bad sign.
-                if option and not option.doc:
-                    option.bad_match = True
 
-                option, pos = parse_option(line, pos, line_num, match)
-                options.append(option)
+            if match := reg.has_arg.search(line[pos:]):
+                # print(line)
+                # print("starts: "+str(match.span(1)[0]))
+                pos = match.span(1)[0]
                 
-                if not option.bad_match:
-                    pos = len(line)
-                elif not iterative:
-                    pos = len(line)
+                if match := reg.switch.search(line[pos:]): pass
+                elif match := reg.argument.search(line[pos:]): pass
+                if match:
+                    # Not finding docs is a bad sign.
+                    if option and not option.doc:
+                        option.bad_match = True
+
+                    option, pos = parse_option(line, pos, line_num, match)
+                    options.append(option)
+
+                    if not option.bad_match:
+                        pos = len(line)
+                    elif not iterative:
+                        pos = len(line)
+                else:
+                    print("Oh no! this is bad.")
+                    print(line[pos:])
+                        
                     
             elif option and reg.whitespace.search(line):
                 # check if text starts past switch text
@@ -382,6 +394,7 @@ def main():
     parser.add_argument("-nb", "--no_bad_matches", action="store_true", help="don't display bad matches.")
     parser.add_argument("--verbose", action="store_true", help="show unused text etc.")
     parser.add_argument("-v", "--version", action="version", version=version)
+    parser.add_argument("--debug", action="store_true", help="print debug information, don't build modules")
     # Tests
     # todo: make these self verifying.
     parser.add_argument("-t1", "--test1", help="test: default argparse arg for test")
@@ -419,7 +432,7 @@ class cli_{cmd}:
                 setattr(self, k, args[k])
         pass
 
-    def run(self):
+    def run(self, *in_args):
         args = ["{cmd}"]
         for k in options:
             val = getattr(self, k, None)
@@ -429,61 +442,66 @@ class cli_{cmd}:
                     args.append(options[k]["switch"])
                 else:
                     args.append(options[k]["switch"]+join+str(val))
-        print(args)
+        args.extend(in_args)
+        print("Running: '"+" ".join(args)+"'")
         subprocess.run(args)
         pass
     """
 
     parsed = [(*parse(help_text), "help")]# , (*parse(man_text), "man")]
     for prologue, unused, options, usage, name in parsed:
-        if False:
+        if args.debug:
             debug_print(prologue, unused, options, usage, name, args.verbose, args.no_bad_matches)
+        else:
         
-        # Filter out bad options etc.
-        options = [o for o in options if not o.bad_match and not o.name.rstrip("_") in ["help", "version"]]
-        options = [o for o in options if len(o.name) > 2]
-        options_dict = {}
-        for o in options:
-            if o.name not in options_dict:
-                options_dict[o.name] = o
-        options = [o for o in options_dict.values()]
-        option_dict = {o.name: o.to_dict() for o in options}
-        
-        # Generate options.pkl
-        cmd = usage.match.groups()[0]
-        os.makedirs(f"cli_{cmd}", exist_ok=True)
-        pickle.dump(option_dict, open(f"cli_{cmd}/options.pkl", "wb"))
-        
-        # Generate docs
-        tab = 4
-        max_name = max([len(o.name+":  ") for o in options])+tab
-        doc = []
-        doc.extend(["".rjust(tab)+f"{o.name}: " for o in options])
-        doc = zip(doc, options)
-        doc = [n.ljust(max_name)+"\n".ljust(max_name+1).join(o.doc) for n, o in doc]
-        doc  = "\n".join(doc)+"\n"
-        
-        # Generate props
-        split = 4
-        props = []
-        props.extend([f"{o.name}" for o in options])
-        props = [a+"=" for a in props]
-        props = [props[a]+"None\n"+"".ljust(4) if a%split == split-1 else props[a] for a in range(0, len(props))]
-        props.append("None" if len(props)%split != 0 else "")
-        props = "    "+"".join(props)
-        
-        # Generate init args
-        args = []
-        args.extend([f"{o.name} = None" for o in options])
-        args = [a+", " if a != args[-1] else a for a in args]
-        args = [args[a]+"\n".ljust(18) if a%split == split-1 else args[a] for a in range(0, len(args))]
-        args = "".join(args)
-        # 
-        init = class_fmt.format(cmd=cmd, doc=doc, props=props, args=args)
-        open(f"cli_{cmd}/__init__.py", "w").write(init)
-        
-        from cli_ls import cli_ls as ls
-        ls(almost_all=True, color=True).run()
+            # Filter out bad options etc.
+            options = [o for o in options if not o.bad_match and not o.name.rstrip("_") in ["help", "version"]]
+            options = [o for o in options if len(o.name) > 2]
+            options_dict = {}
+            for o in options:
+                if o.name not in options_dict:
+                    options_dict[o.name] = o
+            options = [o for o in options_dict.values()]
+            option_dict = {o.name: o.to_dict() for o in options}
+
+            # Generate options.pkl
+            cmd = usage.match.groups()[0]
+            os.makedirs(f"cli_{cmd}", exist_ok=True)
+            pickle.dump(option_dict, open(f"cli_{cmd}/options.pkl", "wb"))
+
+            # Generate docs
+            tab = 4
+            max_name = max([len(o.name+":  ") for o in options])+tab
+            doc = []
+            doc.extend(["".rjust(tab)+f"{o.name}: " for o in options])
+            doc = zip(doc, options)
+            doc = [n.ljust(max_name)+"\n".ljust(max_name+1).join(o.doc) for n, o in doc]
+            doc  = "\n".join(doc)+"\n"
+
+            # Generate props
+            split = 4
+            props = []
+            props.extend([f"{o.name}" for o in options])
+            props = [a+"=" for a in props]
+            props = [props[a]+"None\n"+"".ljust(4) if a%split == split-1 else props[a] for a in range(0, len(props))]
+            props.append("None" if len(props)%split != 0 else "")
+            props = "    "+"".join(props)
+
+            # Generate init args
+            args = []
+            args.extend([f"{o.name} = None" for o in options])
+            args = [a+", " if a != args[-1] else a for a in args]
+            args = [args[a]+"\n".ljust(18) if a%split == split-1 else args[a] for a in range(0, len(args))]
+            args = "".join(args)
+            # 
+            init = class_fmt.format(cmd=cmd, doc=doc, props=props, args=args)
+            open(f"cli_{cmd}/__init__.py", "w").write(init)
+
+            # from cli_ls import cli_ls as ls
+            # from cli_git import cli_git as git
+            # ls(almost_all=True, color=True).run()
+            # ls(all_=True).run()
+            # git(diff=True).run()
 
 if __name__ == "__main__":
     main()
