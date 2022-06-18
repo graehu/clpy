@@ -432,16 +432,20 @@ class cli_{cmd}:
                 setattr(self, k, args[k])
         pass
 
-    def run(self, *in_args):
+    def run(self, *in_args, **kwargs):
         args = ["{cmd}"]
         for k in options:
             val = getattr(self, k, None)
+            val = kwargs[k] if k in kwargs else val
             if val:
                 join = "=" if options[k]["wants_equals"] else " "
                 if isinstance(val, bool):
                     args.append(options[k]["switch"])
                 else:
                     args.append(options[k]["switch"]+join+str(val))
+        for k in kwargs:
+            if k not in options:
+                print("unexpected keyword argument: "+k)
         args.extend(in_args)
         print("Running: '"+" ".join(args)+"'")
         subprocess.run(args)
