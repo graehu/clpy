@@ -391,6 +391,7 @@ def parse(text, iterative=False):
 def main():
     parser = argparse.ArgumentParser(prog=program_name, description=description)
     parser.add_argument("command", help="the command to convert to a module")
+    parser.add_argument("--globals", "-g", action="append", help="flags to set globally for the module")
     parser.add_argument("-nb", "--no_bad_matches", action="store_true", help="don't display bad matches.")
     parser.add_argument("--verbose", action="store_true", help="show unused text etc.")
     parser.add_argument("-v", "--version", action="version", version=version)
@@ -414,41 +415,60 @@ def main():
 import subprocess
 import pickle
 import os
+from enum import Enum, auto
 
 curdir = os.path.dirname(__file__)
 options = pickle.load(open(os.path.join(curdir, "options.pkl"), "rb"))
 
 class cli_{cmd}:
     \"\"\"
-{doc}
-    \"\"\"
-        
-{props}
+    Functions are passed cli_{cmd}._.flags.
+    Look at cli_{cmd}._ for more information.
 
-    def __init__(self, {args}):
-        args = locals()
-        for k in args:
-            if args[k] and hasattr(self, k):
-                setattr(self, k, args[k])
+    All available flags:
+    -------------------
+{doc}
+
+    \"\"\"
+    __g_flags = {g_flags}
+    __flags = None
+    def __init__(self, *in_flags):
+        self.__flags = dict()
+        self.add_flags(*in_flags)
         pass
 
-    def run(self, *in_args, **kwargs):
+    def add_flags(self, *in_flags):
+        for a in in_flags:
+            if isinstance(a, cli_{cmd}._):
+                self.__flags[a] = a
+            elif isinstance(a, tuple) and isinstance(a[0], cli_{cmd}._):
+                self.__flags[a[0]] = a[1:]
+        pass
+
+    def del_flags(self, *in_flags):
+        for a in in_flags:
+            if a in self.__flags:
+                del(self.__flags[a])
+        pass
+
+    def run(self, *in_args):
         args = ["{cmd}"]
-        for k in options:
-            val = getattr(self, k, None)
-            val = kwargs[k] if k in kwargs else val
-            if val:
-                join = "=" if options[k]["wants_equals"] else " "
-                if isinstance(val, bool):
-                    args.append(options[k]["switch"])
-                else:
-                    args.append(options[k]["switch"]+join+str(val))
-        for k in kwargs:
-            if k not in options:
-                print("unexpected keyword argument: "+k)
+        args.extend(self.__g_flags)
+        for k in self.__flags:
+            val = self.__flags[k]
+            if isinstance(val, tuple):
+                join = "=" if options[k.name]["wants_equals"] else " "
+                args.append(options[k.name]["switch"]+join+",".join(val))
+            else:
+                args.append(options[k.name]["switch"])
+
         args.extend(in_args)
         print("Running: '"+" ".join(args)+"'")
         subprocess.run(args)
+        pass
+
+    class _(Enum):
+{enum}
         pass
     """
 
@@ -460,7 +480,7 @@ class cli_{cmd}:
         
             # Filter out bad options etc.
             options = [o for o in options if not o.bad_match and not o.name.rstrip("_") in ["help", "version"]]
-            options = [o for o in options if len(o.name) > 2]
+            # options = [o for o in options if len(o.name) > 2]
             options_dict = {}
             for o in options:
                 if o.name not in options_dict:
@@ -474,38 +494,56 @@ class cli_{cmd}:
             pickle.dump(option_dict, open(f"cli_{cmd}/options.pkl", "wb"))
 
             # Generate docs
-            tab = 4
-            max_name = max([len(o.name+":  ") for o in options])+tab
+            # tab = 4
+            # max_name = max([len(f"{cmd}._."+o.name+":  ") for o in options])+tab
+            # doc = []
+            # doc.extend(["".rjust(tab)+(f"({cmd}._.{o.name}, {o.nargs}): " if o.nargs else f"{cmd}._.{o.name}: ") for o in options])
+            # doc = zip(doc, options)
+            # doc = [n.ljust(max_name)+"\n".ljust(max_name+1).join(o.doc) for n, o in doc]
+            # doc  = "\n".join(doc)+"\n"
+            split = 5
             doc = []
-            doc.extend(["".rjust(tab)+f"{o.name}: " for o in options])
-            doc = zip(doc, options)
-            doc = [n.ljust(max_name)+"\n".ljust(max_name+1).join(o.doc) for n, o in doc]
-            doc  = "\n".join(doc)+"\n"
+            doc.extend([f"{o.name}" for o in options])
+            doc = [a+", " if a != doc[-1] else a for a in doc]
+            doc = [doc[a]+"\n".ljust(5) if a%split == split-1 else doc[a] for a in range(0, len(doc))]
+            doc = "".ljust(4)+"".join(doc)
+            
 
             # Generate props
-            split = 4
-            props = []
-            props.extend([f"{o.name}" for o in options])
-            props = [a+"=" for a in props]
-            props = [props[a]+"None\n"+"".ljust(4) if a%split == split-1 else props[a] for a in range(0, len(props))]
-            props.append("None" if len(props)%split != 0 else "")
-            props = "    "+"".join(props)
+            # split = 4
+            # props = []
+            # props.extend([f"{o.name}" for o in options if o.nargs])
+            # props = [a+"=" for a in props]
+            # props = [props[a]+"None\n"+"".ljust(4) if a%split == split-1 else props[a] for a in range(0, len(props))]
+            # props.append("None" if len(props)%split != 0 else "")
+            # props = "".ljust(4)+"".join(props)
+
+            # Generate enums
+            enums = []
+            enums.extend([
+                (
+                    *["# "+d for d in o.doc],
+                    "# usage: func("+(f"(cli_{cmd}._.{o.name}, {o.nargs})" if o.nargs else f"cli_{cmd}._.{o.name}")+")",
+                    f"{o.name} = auto()"
+                ) for o in options
+            ])
+            enums = ["\n"+"\n".ljust(9).join(("", *a)) for a in enums]
+            enums[0] = "".ljust(8)+enums[0].lstrip()
+            enums = "".join(enums)
 
             # Generate init args
-            args = []
-            args.extend([f"{o.name} = None" for o in options])
-            args = [a+", " if a != args[-1] else a for a in args]
-            args = [args[a]+"\n".ljust(18) if a%split == split-1 else args[a] for a in range(0, len(args))]
-            args = "".join(args)
-            # 
-            init = class_fmt.format(cmd=cmd, doc=doc, props=props, args=args)
+            # args = []
+            # args.extend([f"{o.name} = None" for o in options if o.nargs])
+            # args = [a+", " if a != args[-1] else a for a in args]
+            # args = [args[a]+"\n".ljust(18) if a%split == split-1 else args[a] for a in range(0, len(args))]
+            # args = "".ljust(18)+"".join(args)
+            #
+            g_flags = args.globals if args.globals else []
+            init = class_fmt.format(cmd=cmd, doc=doc, enum=enums, g_flags=g_flags)
             open(f"cli_{cmd}/__init__.py", "w").write(init)
+            from cli_ls import cli_ls as ls
+            ls(ls._.color).run()
 
-            # from cli_ls import cli_ls as ls
-            # from cli_git import cli_git as git
-            # ls(almost_all=True, color=True).run()
-            # ls(all_=True).run()
-            # git(diff=True).run()
 
 if __name__ == "__main__":
     main()
