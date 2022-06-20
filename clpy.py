@@ -256,6 +256,15 @@ def parse_option(line, pos, line_num, match):
             break
 
     option_add_nargs(child)
+    # todo: this is a hack to fix cases switch usage isn't explained in the parent.
+    # it would probably be better to split each child into it's own long+short option
+    # when creating modules.
+    for child in option.children:
+        if child.nargs and not option.nargs:
+            option.nargs = child.nargs
+        if child.wants_equals and not option.wants_equals:
+            option.wants_equals = child.wants_equals
+
     opt_usage, doc = line[option.span[0]:pos], line[pos:]
     if doc.strip(): option.doc.append(doc.strip())
     option.usage = opt_usage.strip()
@@ -543,6 +552,7 @@ class cli_{cmd}:
             open(f"cli_{cmd}/__init__.py", "w").write(init)
             from cli_ls import cli_ls as ls
             ls(ls._.color).run()
+            ls((ls._.width, "0")).run()
 
 
 if __name__ == "__main__":
