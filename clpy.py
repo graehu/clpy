@@ -39,7 +39,7 @@ class OptionMeta:
             out.append("'\n".join([f"line {n}: '{l}" for n, l in option.lines])+"'\n")
         if option.usage:
             out.append("usage:".ljust(just)+option.usage)
-            if option.bad_match: out.append("bad_match:".ljust(just)+str(option.bad_match))
+            if option.bad_match: out.append("bad_match:".ljust(just)+str(option.bad_match)+": "+option.bad_match_reason)
             if option.wants_equals: out.append("equals: ".ljust(just)+str(option.wants_equals))
         if option.switch:
             out.append("switch:".ljust(just)+str(option.switch.groups()[0]))
@@ -137,10 +137,13 @@ class Option:
     children = None
     span = None
     bad_match = False
+    bad_match_reason = ""
     ellipsis = False
     wants_equals = False
     option_depth = 0
     enum_depth = 0
+    all_names = {}
+    is_parent = False
 
     def __init__(self):
         self.lines = []
@@ -152,9 +155,12 @@ class Option:
 
     def to_dict(self):
         return {
-            "switch": max([c.switch.group(1) for c in [self, *self.children]], key=len),
-            "nargs": self.nargs,
-            "wants_equals": self.wants_equals
+            o.name : {
+                "switch": o.switch.group(1),
+                "nargs": o.nargs,
+                "wants_equals": o.wants_equals
+            }
+            for o in [self, *self.children]
         }
 
 class Usage:
@@ -192,6 +198,7 @@ def option_add_nargs(option):
 
 def parse_option(line, pos, line_num, match):
     option = Option()
+    option.is_parent = True
     option.lines.append((line_num, line))
     option.span = (pos + match.span(1)[0], pos + match.span(1)[1])
     option.switch = match
@@ -253,6 +260,7 @@ def parse_option(line, pos, line_num, match):
             # Reverting to start pos.
             pos = option.span[1]
             option.bad_match = True
+            option.bad_match_reason = "Couldn't find a valid match"
             break
 
     option_add_nargs(child)
@@ -262,16 +270,26 @@ def parse_option(line, pos, line_num, match):
     for child in option.children:
         if child.nargs and not option.nargs:
             option.nargs = child.nargs
-        if child.wants_equals and not option.wants_equals:
-            option.wants_equals = child.wants_equals
+        # if child.wants_equals and not option.wants_equals:
+        #     option.wants_equals = child.wants_equals
 
     opt_usage, doc = line[option.span[0]:pos], line[pos:]
     if doc.strip(): option.doc.append(doc.strip())
     option.usage = opt_usage.strip()
-    option.name = max([c.switch.group(1).lstrip('-') for c in [option, *option.children]], key=len)
-    option.name = option.name.replace("-", "_")
-    if option.name in keyword.kwlist: option.name = option.name+"_"
-    if option.name in dir(builtins): option.name = option.name+"_"
+    for o in [option, *option.children]:
+        o.name = o.switch.group(1).lstrip("-")
+        o.name = o.name.replace("-", "_")
+        if o.name in keyword.kwlist: o.name = o.name+"_"
+        if o.name in dir(builtins): o.name = o.name+"_"
+        o.name = o.name
+        if o.name not in Option.all_names:
+            Option.all_names[o.name] = o
+        else:
+            # we can't allow two flags with the same name
+            o.bad_match = True
+            o.bad_match_reason = f"The name '{o.name}' already exists"
+            # todo: consider appending doc strings or something?
+        pass
     return option, pos
 
 def parse(text, iterative=False):
@@ -341,6 +359,8 @@ def parse(text, iterative=False):
     prologue = []
     unused = []
     options = []
+    # hack, stops us blocking legitimate names found in usage.
+    Option.all_names = {}
     
     for line in text[line_num:]:
         line_num += 1
@@ -358,6 +378,7 @@ def parse(text, iterative=False):
                     # Not finding docs is a bad sign.
                     if option and not option.doc:
                         option.bad_match = True
+                        option.bad_match_reason = "Couldn't find a doc string."
 
                     option, pos = parse_option(line, pos, line_num, match)
                     options.append(option)
@@ -466,6 +487,7 @@ class cli_{cmd}:
         for k in self.__flags:
             val = self.__flags[k]
             if isinstance(val, tuple):
+                val = [str(v) for v in val]
                 join = "=" if options[k.name]["wants_equals"] else " "
                 args.append(options[k.name]["switch"]+join+",".join(val))
             else:
@@ -489,27 +511,19 @@ class cli_{cmd}:
         
             # Filter out bad options etc.
             options = [o for o in options if not o.bad_match and not o.name.rstrip("_") in ["help", "version"]]
-            # options = [o for o in options if len(o.name) > 2]
             options_dict = {}
             for o in options:
                 if o.name not in options_dict:
                     options_dict[o.name] = o
             options = [o for o in options_dict.values()]
-            option_dict = {o.name: o.to_dict() for o in options}
-
+            option_dict = {}
+            for o in options: option_dict = {**o.to_dict(), **option_dict}
+                
             # Generate options.pkl
             cmd = usage.match.groups()[0]
             os.makedirs(f"cli_{cmd}", exist_ok=True)
             pickle.dump(option_dict, open(f"cli_{cmd}/options.pkl", "wb"))
-
-            # Generate docs
-            # tab = 4
-            # max_name = max([len(f"{cmd}._."+o.name+":  ") for o in options])+tab
-            # doc = []
-            # doc.extend(["".rjust(tab)+(f"({cmd}._.{o.name}, {o.nargs}): " if o.nargs else f"{cmd}._.{o.name}: ") for o in options])
-            # doc = zip(doc, options)
-            # doc = [n.ljust(max_name)+"\n".ljust(max_name+1).join(o.doc) for n, o in doc]
-            # doc  = "\n".join(doc)+"\n"
+            
             split = 5
             doc = []
             doc.extend([f"{o.name}" for o in options])
@@ -517,42 +531,25 @@ class cli_{cmd}:
             doc = [doc[a]+"\n".ljust(5) if a%split == split-1 else doc[a] for a in range(0, len(doc))]
             doc = "".ljust(4)+"".join(doc)
             
-
-            # Generate props
-            # split = 4
-            # props = []
-            # props.extend([f"{o.name}" for o in options if o.nargs])
-            # props = [a+"=" for a in props]
-            # props = [props[a]+"None\n"+"".ljust(4) if a%split == split-1 else props[a] for a in range(0, len(props))]
-            # props.append("None" if len(props)%split != 0 else "")
-            # props = "".ljust(4)+"".join(props)
-
             # Generate enums
             enums = []
             enums.extend([
                 (
                     *["# "+d for d in o.doc],
                     "# usage: func("+(f"(cli_{cmd}._.{o.name}, {o.nargs})" if o.nargs else f"cli_{cmd}._.{o.name}")+")",
-                    f"{o.name} = auto()"
-                ) for o in options
+                    *[f"{d.name} = auto()" for d in [o, *[c for c in o.children if not c.bad_match]]]
+                ) for o in options if o.is_parent
             ])
             enums = ["\n"+"\n".ljust(9).join(("", *a)) for a in enums]
             enums[0] = "".ljust(8)+enums[0].lstrip()
             enums = "".join(enums)
 
-            # Generate init args
-            # args = []
-            # args.extend([f"{o.name} = None" for o in options if o.nargs])
-            # args = [a+", " if a != args[-1] else a for a in args]
-            # args = [args[a]+"\n".ljust(18) if a%split == split-1 else args[a] for a in range(0, len(args))]
-            # args = "".ljust(18)+"".join(args)
-            #
             g_flags = args.globals if args.globals else []
             init = class_fmt.format(cmd=cmd, doc=doc, enum=enums, g_flags=g_flags)
             open(f"cli_{cmd}/__init__.py", "w").write(init)
+            # test it
             from cli_ls import cli_ls as ls
-            ls(ls._.color).run()
-            ls((ls._.width, "0")).run()
+            ls((ls._.width, 0), ls._.color).run()
 
 
 if __name__ == "__main__":
