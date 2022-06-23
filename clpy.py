@@ -144,6 +144,7 @@ class Option:
     enum_depth = 0
     all_names = {}
     is_parent = False
+    is_positional = False
 
     def __init__(self):
         self.lines = []
@@ -290,6 +291,7 @@ def parse_option(line, pos, line_num, match):
             o.bad_match_reason = f"The name '{o.name}' already exists"
             # todo: consider appending doc strings or something?
         pass
+    option.is_positional = not option.children and not option.nargs and not option.switch.group(1).startswith("-")
     return option, pos
 
 def parse(text, iterative=False):
@@ -455,9 +457,14 @@ class cli_{cmd}:
     Functions are passed cli_{cmd}._.flags.
     Look at cli_{cmd}._ for more information.
 
+    Positional arguments:
+    -------------------
+{docargs}
+
+
     All available flags:
     -------------------
-{doc}
+{docflags}
 
     \"\"\"
     __g_flags = {g_flags}
@@ -510,7 +517,8 @@ class cli_{cmd}:
         else:
         
             # Filter out bad options etc.
-            options = [o for o in options if not o.bad_match and not o.name.rstrip("_") in ["help", "version"]]
+            positional = [o for o in options if not o.bad_match and o.is_positional]
+            options = [o for o in options if not o.bad_match and not o.name.rstrip("_") in ["help", "version"] and not o.is_positional]
             options_dict = {}
             for o in options:
                 if o.name not in options_dict:
@@ -525,11 +533,20 @@ class cli_{cmd}:
             pickle.dump(option_dict, open(f"cli_{cmd}/options.pkl", "wb"))
             
             split = 5
-            doc = []
-            doc.extend([f"{o.name}" for o in options])
-            doc = [a+", " if a != doc[-1] else a for a in doc]
-            doc = [doc[a]+"\n".ljust(5) if a%split == split-1 else doc[a] for a in range(0, len(doc))]
-            doc = "".ljust(4)+"".join(doc)
+            tab = 8
+            docflags = []
+            docflags.extend([o.name for o in options])
+            docflags = [a+", " if a != docflags[-1] else a for a in docflags]
+            docflags = [docflags[a]+"\n".ljust(tab+1) if a%split == split-1 else docflags[a] for a in range(0, len(docflags))]
+            docflags = "".ljust(tab)+"".join(docflags)
+
+            docargs = []
+            docargs.extend([p.name for p in positional])
+            docargs = [p+", " if p != docargs[-1] else p for p in docargs]
+            docargs = [docargs[a]+"\n".ljust(tab+1) if a%split == split-1 else docargs[a] for a in range(0, len(docargs))]
+            docargs = "".ljust(tab)+"".join(docargs)
+
+            
             
             # Generate enums
             enums = []
@@ -545,11 +562,14 @@ class cli_{cmd}:
             enums = "".join(enums)
 
             g_flags = args.globals if args.globals else []
-            init = class_fmt.format(cmd=cmd, doc=doc, enum=enums, g_flags=g_flags)
+            init = class_fmt.format(cmd=cmd, docflags=docflags, docargs=docargs, enum=enums, g_flags=g_flags)
             open(f"cli_{cmd}/__init__.py", "w").write(init)
             # test it
             from cli_ls import cli_ls as ls
+            from cli_clpy import cli_clpy as cccc
             ls((ls._.width, 0), ls._.color).run()
+            cccc()
+            
 
 
 if __name__ == "__main__":
