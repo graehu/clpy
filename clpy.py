@@ -457,15 +457,8 @@ class cli_{cmd}:
     Functions are passed cli_{cmd}._.flags.
     Look at cli_{cmd}._ for more information.
 
-    Positional arguments:
-    -------------------
 {docargs}
-
-
-    All available flags:
-    -------------------
 {docflags}
-
     \"\"\"
     __g_flags = {g_flags}
     __flags = None
@@ -518,7 +511,7 @@ class cli_{cmd}:
         
             # Filter out bad options etc.
             positional = [o for o in options if not o.bad_match and o.is_positional]
-            options = [o for o in options if not o.bad_match and not o.name.rstrip("_") in ["help", "version"] and not o.is_positional]
+            options = [o for o in options if not o.bad_match and not o.is_positional]
             options_dict = {}
             for o in options:
                 if o.name not in options_dict:
@@ -531,22 +524,37 @@ class cli_{cmd}:
             cmd = usage.match.groups()[0]
             os.makedirs(f"cli_{cmd}", exist_ok=True)
             pickle.dump(option_dict, open(f"cli_{cmd}/options.pkl", "wb"))
-            
-            split = 5
-            tab = 8
-            docflags = []
-            docflags.extend([o.name for o in options])
-            docflags = [a+", " if a != docflags[-1] else a for a in docflags]
-            docflags = [docflags[a]+"\n".ljust(tab+1) if a%split == split-1 else docflags[a] for a in range(0, len(docflags))]
-            docflags = "".ljust(tab)+"".join(docflags)
 
-            docargs = []
-            docargs.extend([p.name for p in positional])
-            docargs = [p+", " if p != docargs[-1] else p for p in docargs]
-            docargs = [docargs[a]+"\n".ljust(tab+1) if a%split == split-1 else docargs[a] for a in range(0, len(docargs))]
-            docargs = "".ljust(tab)+"".join(docargs)
-
+            def OptionsList(options, tab, length):
+                lines = [",".join([o.name, *[c.name for c in o.children]]) for o in options]
+                lines = [a+"," if a != lines[-1] else a for a in lines]
+                lines = "".join(lines).split(",")
+                lines = [a+", " if a != lines[-1] else a for a in lines]
+                docstring = ""
+                short_lines = []
+                for d in lines:
+                    if len(docstring+d) > length:
+                        short_lines.append(docstring)
+                        docstring = d
+                    else:
+                        docstring += d
+                short_lines.append(docstring)
+                return short_lines
             
+            length = 32
+            tab = 4
+            docflags = ["All available flags:",
+                        "--------------------",
+                        "",
+                        *OptionsList(options, tab, length), ""]
+            docflags = "".ljust(tab)+"\n".ljust(tab+1).join(docflags) if len(docflags) > 4 else ""
+
+                
+            docargs = ["Positional arguments:",
+                        "--------------------",
+                        "",
+                        *OptionsList(positional, tab, length), ""]
+            docargs = "".ljust(tab)+"\n".ljust(tab+1).join(docargs) if len(docargs) > 4 else ""
             
             # Generate enums
             enums = []
