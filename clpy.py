@@ -455,11 +455,7 @@ options = pickle.load(open(os.path.join(curdir, "options.pkl"), "rb"))
 
 class cli_{cmd}:
     \"\"\"
-    Functions are passed cli_{cmd}.{f}.flags.
-    Look at cli_{cmd}.{f} for more information.
-
-{docargs}
-{docflags}
+{docargs}{docflags}
     \"\"\"
     __g_flags = {g_flags}
     __flags = None
@@ -545,24 +541,23 @@ class cli_{cmd}:
             
             length = 64
             tab = 4
+
+            docargs = OptionsList(positional, tab, length)
+            if docargs:
+                docargs = ["Positional arguments:",
+                           "".ljust(length, "-"),
+                            *docargs, "\n"]
+                docargs = "".ljust(tab)+"\n".ljust(tab+1).join(docargs)
+            else: docargs = ""
+            
             docflags = OptionsList(options, tab, length)
             if docflags:
                 docflags = ["All available flags:",
-                            "--------------------",
-                            "",
+                            "".ljust(length, "-"),
                             *docflags, ""]
                 docflags = "".ljust(tab)+"\n".ljust(tab+1).join(docflags)
             else: docflags = ""
             
-            docargs = OptionsList(positional, tab, length)
-            if docargs:
-                print(docargs)
-                docargs = ["Positional arguments:",
-                            "--------------------",
-                            "",
-                            *docargs, ""]
-                docargs = "".ljust(tab)+"\n".ljust(tab+1).join(docargs)
-            else: docargs = ""
             
             # Generate enums
             enums = []
