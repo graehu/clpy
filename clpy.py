@@ -441,6 +441,7 @@ def main():
     
     args = parser.parse_args()
     help_text = subprocess.getoutput(args.command+" --help").split("\n")
+    flag_name = "f"
     # man_text = subprocess.getoutput("man -P cat "+args.command).split("\n")
     # todo: It might be better to have a base class + kwargs
     class_fmt = """# clpy generated, do not modify by hand
@@ -454,8 +455,8 @@ options = pickle.load(open(os.path.join(curdir, "options.pkl"), "rb"))
 
 class cli_{cmd}:
     \"\"\"
-    Functions are passed cli_{cmd}._.flags.
-    Look at cli_{cmd}._ for more information.
+    Functions are passed cli_{cmd}.{f}.flags.
+    Look at cli_{cmd}.{f} for more information.
 
 {docargs}
 {docflags}
@@ -469,9 +470,9 @@ class cli_{cmd}:
 
     def add_flags(self, *in_flags):
         for a in in_flags:
-            if isinstance(a, cli_{cmd}._):
+            if isinstance(a, cli_{cmd}.{f}):
                 self.__flags[a] = a
-            elif isinstance(a, tuple) and isinstance(a[0], cli_{cmd}._):
+            elif isinstance(a, tuple) and isinstance(a[0], cli_{cmd}.{f}):
                 self.__flags[a[0]] = a[1:]
         pass
 
@@ -498,7 +499,7 @@ class cli_{cmd}:
         subprocess.run(args)
         pass
 
-    class _(Enum):
+    class {f}(Enum):
 {enum}
         pass
     """
@@ -538,30 +539,37 @@ class cli_{cmd}:
                         docstring = d
                     else:
                         docstring += d
-                short_lines.append(docstring)
+                if docstring:
+                    short_lines.append(docstring)
                 return short_lines
             
-            length = 32
+            length = 64
             tab = 4
-            docflags = ["All available flags:",
-                        "--------------------",
-                        "",
-                        *OptionsList(options, tab, length), ""]
-            docflags = "".ljust(tab)+"\n".ljust(tab+1).join(docflags) if len(docflags) > 4 else ""
-
-                
-            docargs = ["Positional arguments:",
-                        "--------------------",
-                        "",
-                        *OptionsList(positional, tab, length), ""]
-            docargs = "".ljust(tab)+"\n".ljust(tab+1).join(docargs) if len(docargs) > 4 else ""
+            docflags = OptionsList(options, tab, length)
+            if docflags:
+                docflags = ["All available flags:",
+                            "--------------------",
+                            "",
+                            *docflags, ""]
+                docflags = "".ljust(tab)+"\n".ljust(tab+1).join(docflags)
+            else: docflags = ""
+            
+            docargs = OptionsList(positional, tab, length)
+            if docargs:
+                print(docargs)
+                docargs = ["Positional arguments:",
+                            "--------------------",
+                            "",
+                            *docargs, ""]
+                docargs = "".ljust(tab)+"\n".ljust(tab+1).join(docargs)
+            else: docargs = ""
             
             # Generate enums
             enums = []
             enums.extend([
                 (
                     *["# "+d for d in o.doc],
-                    "# usage: func("+(f"(cli_{cmd}._.{o.name}, {o.nargs})" if o.nargs else f"cli_{cmd}._.{o.name}")+")",
+                    "# usage: func("+(f"(cli_{cmd}.{flag_name}.{o.name}, {o.nargs})" if o.nargs else f"cli_{cmd}.{flag_name}.{o.name}")+")",
                     *[f"{d.name} = auto()" for d in [o, *[c for c in o.children if not c.bad_match]]]
                 ) for o in options if o.is_parent
             ])
@@ -570,15 +578,11 @@ class cli_{cmd}:
             enums = "".join(enums)
 
             g_flags = args.globals if args.globals else []
-            init = class_fmt.format(cmd=cmd, docflags=docflags, docargs=docargs, enum=enums, g_flags=g_flags)
+            init = class_fmt.format(cmd=cmd, docflags=docflags, docargs=docargs, enum=enums, g_flags=g_flags, f=flag_name)
             open(f"cli_{cmd}/__init__.py", "w").write(init)
             # test it
             from cli_ls import cli_ls as ls
-            from cli_clpy import cli_clpy as cccc
-            ls((ls._.width, 0), ls._.color).run()
-            cccc()
-            
-
+            ls((ls.f.width, 0), ls.f.color).run()
 
 if __name__ == "__main__":
     main()
