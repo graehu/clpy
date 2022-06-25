@@ -11,6 +11,34 @@ program_name = "clpy"
 description = """Convert a CLI to a python module."""
 version = "0.0.1"
 
+curdir = os.path.dirname(__file__)
+
+flag_name = "f"
+# man_text = subprocess.getoutput("man -P cat "+args.command).split("\n")
+# todo: It might be better to have a base class + kwargs
+class_fmt = """# clpy generated, do not modify by hand
+import clpy.cli as cli
+from clpy import curdir
+import pickle
+import os
+from enum import Enum, auto
+
+class cli_{cmd}(cli.cli):
+    \"\"\"
+{docargs}{docflags}
+    \"\"\"
+    __g_flags = {g_flags}
+    __cmd = "{cmd}"
+    __options = pickle.load(open(os.path.join(curdir, "{cmd}_options.pkl"), "rb"))
+    def __init__(self, *in_flags):
+        super().__init__(self.__cmd, self.__options, self.__g_flags, *in_flags)
+        pass
+
+    class {f}(Enum):
+{enum}
+        pass
+"""
+
 class reg:
     usage = re.compile("^(?:usage:) ([A-Z0-9]+)\s+", re.IGNORECASE)
     whitespace = re.compile("^\s")
@@ -419,6 +447,23 @@ def parse(text, iterative=False):
     
     return prologue, unused, options, usage
 
+def options_str_list(options, tab = 4, length = 64):
+    lines = [",".join([o.name, *[c.name for c in o.children]]) for o in options]
+    lines = [a+"," if a != lines[-1] else a for a in lines]
+    lines = "".join(lines).split(",")
+    lines = [a+", " if a != lines[-1] else a for a in lines]
+    options_str = ""
+    option_lines = []
+    for d in lines:
+        if len(options_str+d) > length:
+            option_lines.append(options_str)
+            options_str = d
+        else:
+            options_str += d
+    if options_str:
+        option_lines.append(options_str)
+    return option_lines
+
 
 def main():
     parser = argparse.ArgumentParser(prog=program_name, description=description)
@@ -440,144 +485,67 @@ def main():
     parser.add_argument("-t8", "--test8", choices=["1st", "2nd", "3rd"], help="test: there should be 3 choices")
     
     args = parser.parse_args()
+    
     help_text = subprocess.getoutput(args.command+" --help").split("\n")
-    flag_name = "f"
-    # man_text = subprocess.getoutput("man -P cat "+args.command).split("\n")
-    # todo: It might be better to have a base class + kwargs
-    class_fmt = """# clpy generated, do not modify by hand
-import subprocess
-import pickle
-import os
-from enum import Enum, auto
-
-curdir = os.path.dirname(__file__)
-options = pickle.load(open(os.path.join(curdir, "options.pkl"), "rb"))
-
-class cli_{cmd}:
-    \"\"\"
-{docargs}{docflags}
-    \"\"\"
-    __g_flags = {g_flags}
-    __flags = None
-    def __init__(self, *in_flags):
-        self.__flags = dict()
-        self.add_flags(*in_flags)
-        pass
-
-    def add_flags(self, *in_flags):
-        for a in in_flags:
-            if isinstance(a, cli_{cmd}.{f}):
-                self.__flags[a] = a
-            elif isinstance(a, tuple) and isinstance(a[0], cli_{cmd}.{f}):
-                self.__flags[a[0]] = a[1:]
-        pass
-
-    def del_flags(self, *in_flags):
-        for a in in_flags:
-            if a in self.__flags:
-                del(self.__flags[a])
-        pass
-
-    def run(self, *in_args):
-        args = ["{cmd}"]
-        args.extend(self.__g_flags)
-        for k in self.__flags:
-            val = self.__flags[k]
-            if isinstance(val, tuple):
-                val = [str(v) for v in val]
-                join = "=" if options[k.name]["wants_equals"] else " "
-                args.append(options[k.name]["switch"]+join+",".join(val))
-            else:
-                args.append(options[k.name]["switch"])
-
-        args.extend(in_args)
-        print("Running: '"+" ".join(args)+"'")
-        subprocess.run(args)
-        pass
-
-    class {f}(Enum):
-{enum}
-        pass
-    """
-
-    parsed = [(*parse(help_text), "help")]# , (*parse(man_text), "man")]
-    for prologue, unused, options, usage, name in parsed:
-        if args.debug:
-            debug_print(prologue, unused, options, usage, name, args.verbose, args.no_bad_matches)
-        else:
+    if args.debug:
+        debug_print(prologue, unused, options, usage, "help", args.verbose, args.no_bad_matches)
+    else:
+        generate_module_from_help(help_text, args.globals)
         
-            # Filter out bad options etc.
-            positional = [o for o in options if not o.bad_match and o.is_positional]
-            options = [o for o in options if not o.bad_match and not o.is_positional]
-            options_dict = {}
-            for o in options:
-                if o.name not in options_dict:
-                    options_dict[o.name] = o
-            options = [o for o in options_dict.values()]
-            option_dict = {}
-            for o in options: option_dict = {**o.to_dict(), **option_dict}
-                
-            # Generate options.pkl
-            cmd = usage.match.groups()[0]
-            os.makedirs(f"cli_{cmd}", exist_ok=True)
-            pickle.dump(option_dict, open(f"cli_{cmd}/options.pkl", "wb"))
+def generate_module_from_help(help_text, defaults):
+    _, _, options, usage = parse(help_text)
 
-            def OptionsList(options, tab, length):
-                lines = [",".join([o.name, *[c.name for c in o.children]]) for o in options]
-                lines = [a+"," if a != lines[-1] else a for a in lines]
-                lines = "".join(lines).split(",")
-                lines = [a+", " if a != lines[-1] else a for a in lines]
-                docstring = ""
-                short_lines = []
-                for d in lines:
-                    if len(docstring+d) > length:
-                        short_lines.append(docstring)
-                        docstring = d
-                    else:
-                        docstring += d
-                if docstring:
-                    short_lines.append(docstring)
-                return short_lines
-            
-            length = 64
-            tab = 4
+    # Filter out bad options etc.
+    positional = [o for o in options if not o.bad_match and o.is_positional]
+    options = [o for o in options if not o.bad_match and not o.is_positional]
+    options_dict = {}
+    for o in options:
+        if o.name not in options_dict:
+            options_dict[o.name] = o
+    options = [o for o in options_dict.values()]
+    option_dict = {}
+    for o in options: option_dict = {**o.to_dict(), **option_dict}
 
-            docargs = OptionsList(positional, tab, length)
-            if docargs:
-                docargs = ["Positional arguments:",
-                           "".ljust(length, "-"),
-                            *docargs, "\n"]
-                docargs = "".ljust(tab)+"\n".ljust(tab+1).join(docargs)
-            else: docargs = ""
-            
-            docflags = OptionsList(options, tab, length)
-            if docflags:
-                docflags = ["All available flags:",
-                            "".ljust(length, "-"),
-                            *docflags, ""]
-                docflags = "".ljust(tab)+"\n".ljust(tab+1).join(docflags)
-            else: docflags = ""
-            
-            
-            # Generate enums
-            enums = []
-            enums.extend([
-                (
-                    *["# "+d for d in o.doc],
-                    "# usage: func("+(f"(cli_{cmd}.{flag_name}.{o.name}, {o.nargs})" if o.nargs else f"cli_{cmd}.{flag_name}.{o.name}")+")",
-                    *[f"{d.name} = auto()" for d in [o, *[c for c in o.children if not c.bad_match]]]
-                ) for o in options if o.is_parent
-            ])
-            enums = ["\n"+"\n".ljust(9).join(("", *a)) for a in enums]
-            enums[0] = "".ljust(8)+enums[0].lstrip()
-            enums = "".join(enums)
+    # Generate options.pkl
+    cmd = usage.match.groups()[0]
+    pickle.dump(option_dict, open(os.path.join(curdir,f"{cmd}_options.pkl"), "wb"))
+    
+    length = 64
+    tab = 4
 
-            g_flags = args.globals if args.globals else []
-            init = class_fmt.format(cmd=cmd, docflags=docflags, docargs=docargs, enum=enums, g_flags=g_flags, f=flag_name)
-            open(f"cli_{cmd}/__init__.py", "w").write(init)
-            # test it
-            from cli_ls import cli_ls as ls
-            ls((ls.f.width, 0), ls.f.color).run()
+    docargs = options_str_list(positional, tab, length)
+    if docargs:
+        docargs = ["Positional arguments:",
+                   "".ljust(length, "-"),
+                    *docargs, "\n"]
+        docargs = "".ljust(tab)+"\n".ljust(tab+1).join(docargs)
+    else: docargs = ""
+
+    docflags = options_str_list(options, tab, length)
+    if docflags:
+        docflags = ["All available flags:",
+                    "".ljust(length, "-"),
+                    *docflags, ""]
+        docflags = "".ljust(tab)+"\n".ljust(tab+1).join(docflags)
+    else: docflags = ""
+
+
+    # Generate enums
+    enums = []
+    enums.extend([
+        (
+            *["# "+d for d in o.doc],
+            "# usage: func("+(f"(cli_{cmd}.{flag_name}.{o.name}, {o.nargs})" if o.nargs else f"cli_{cmd}.{flag_name}.{o.name}")+")",
+            *[f"{d.name} = auto()" for d in [o, *[c for c in o.children if not c.bad_match]]]
+        ) for o in options if o.is_parent
+    ])
+    enums = ["\n"+"\n".ljust(9).join(("", *a)) for a in enums]
+    enums[0] = "".ljust(8)+enums[0].lstrip()
+    enums = "".join(enums)
+
+    g_flags = defaults if defaults else []
+    init = class_fmt.format(cmd=cmd, docflags=docflags, docargs=docargs, enum=enums, g_flags=g_flags, f=flag_name)
+    open(os.path.join(curdir, f"cli_{cmd}.py"), "w").write(init)
 
 if __name__ == "__main__":
     main()
