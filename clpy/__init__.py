@@ -335,10 +335,9 @@ def parse(text, iterative=False):
         pos = 0
         if not usage and (not (match := reg.usage.search(line[pos:]))):
             continue
-        
         if match or (usage and len(line)-len(line.lstrip()) >= usage.match.span()[1]
               and usage.lines[-1][0] == line_num -1):
-            
+
             if not usage:
                 usage = Usage()
                 usage.match = match
@@ -488,6 +487,7 @@ def main():
     
     help_text = subprocess.getoutput(args.command+" --help").split("\n")
     if args.debug:
+        prologue, unused, options, usage = parse(help_text)
         debug_print(prologue, unused, options, usage, "help", args.verbose, args.no_bad_matches)
     else:
         generate_module_from_help(help_text, args.globals)
@@ -509,7 +509,7 @@ def generate_module_from_help(help_text, defaults):
     # Generate options.pkl
     cmd = usage.match.groups()[0]
     pickle.dump(option_dict, open(os.path.join(curdir,f"{cmd}_options.pkl"), "wb"))
-    
+
     length = 64
     tab = 4
 
@@ -529,19 +529,20 @@ def generate_module_from_help(help_text, defaults):
         docflags = "".ljust(tab)+"\n".ljust(tab+1).join(docflags)
     else: docflags = ""
 
-
     # Generate enums
-    enums = []
-    enums.extend([
-        (
-            *["# "+d for d in o.doc],
-            "# usage: func("+(f"(cli_{cmd}.{flag_name}.{o.name}, {o.nargs})" if o.nargs else f"cli_{cmd}.{flag_name}.{o.name}")+")",
-            *[f"{d.name} = auto()" for d in [o, *[c for c in o.children if not c.bad_match]]]
-        ) for o in options if o.is_parent
-    ])
-    enums = ["\n"+"\n".ljust(9).join(("", *a)) for a in enums]
-    enums[0] = "".ljust(8)+enums[0].lstrip()
-    enums = "".join(enums)
+    if docflags:
+        enums = []
+        enums.extend([
+            (
+                *["# "+d for d in o.doc],
+                "# usage: func("+(f"(cli_{cmd}.{flag_name}.{o.name}, {o.nargs})" if o.nargs else f"cli_{cmd}.{flag_name}.{o.name}")+")",
+                *[f"{d.name} = auto()" for d in [o, *[c for c in o.children if not c.bad_match]]]
+            ) for o in options if o.is_parent
+        ])
+        enums = ["\n"+"\n".ljust(9).join(("", *a)) for a in enums]
+        enums[0] = "".ljust(8)+enums[0].lstrip()
+        enums = "".join(enums)
+    else: enums = ""
 
     g_flags = defaults if defaults else []
     init = class_fmt.format(cmd=cmd, docflags=docflags, docargs=docargs, enum=enums, g_flags=g_flags, f=flag_name)
