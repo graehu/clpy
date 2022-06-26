@@ -25,7 +25,7 @@ from enum import Enum, auto
 
 class cli_{cmd}(cli.cli):
     \"\"\"
-{docargs}{docflags}
+{usage}{docargs}{docflags}
     \"\"\"
     __g_flags = {g_flags}
     __cmd = "{cmd}"
@@ -510,9 +510,12 @@ def generate_module_from_help(help_text, defaults):
     cmd = usage.match.groups()[0]
     pickle.dump(option_dict, open(os.path.join(curdir,f"{cmd}_options.pkl"), "wb"))
 
+
     length = 64
     tab = 4
-
+    
+    usage = ("\n").join(["".ljust(tab)+u[1] for u in [*usage.lines, (None,"")]])+"\n"
+    
     docargs = options_str_list(positional, tab, length)
     if docargs:
         docargs = ["Positional arguments:",
@@ -545,7 +548,7 @@ def generate_module_from_help(help_text, defaults):
     else: enums = ""
 
     g_flags = defaults if defaults else []
-    init = class_fmt.format(cmd=cmd, docflags=docflags, docargs=docargs, enum=enums, g_flags=g_flags, f=flag_name)
+    init = class_fmt.format(cmd=cmd, usage=usage, docflags=docflags, docargs=docargs, enum=enums, g_flags=g_flags, f=flag_name)
     open(os.path.join(curdir, f"cli_{cmd}.py"), "w").write(init)
 
 if __name__ == "__main__":
