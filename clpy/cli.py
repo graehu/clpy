@@ -1,8 +1,11 @@
 import subprocess
 
+silent = False
+
 class cli:
     """
-    base class for all cli modules
+    base class for all cli modules.
+    not for direct use.
     """
     __g_flags = []
     __flags = None
@@ -22,6 +25,8 @@ class cli:
                 self.__flags[a] = a
             elif isinstance(a, tuple) and isinstance(a[0], self.f):
                 self.__flags[a[0]] = a[1:]
+            elif not silent:
+                print("Failed to add '"+str(a)+"', it's not a "+type(self).__name__+".f flag")
         pass
 
     def del_flags(self, *in_flags):
@@ -43,6 +48,7 @@ class cli:
                 args.append(self.__options[k.name]["switch"])
 
         args.extend(in_args)
-        print("Running: '"+" ".join(args)+"'")
+        if not silent:
+            print("Running: '"+" ".join(args)+"'")
         subprocess.run(args)
         pass
