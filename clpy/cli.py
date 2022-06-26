@@ -9,7 +9,7 @@ class cli:
     """
     __g_flags = []
     __flags = None
-    __cmd = "echo"
+    __cmd = ["echo"]
     __options = None
     def __init__(self, cmd, options, g_flags, *in_flags):
         self.__cmd = cmd
@@ -24,7 +24,10 @@ class cli:
             if isinstance(a, self.f):
                 self.__flags[a] = a
             elif isinstance(a, tuple) and isinstance(a[0], self.f):
-                self.__flags[a[0]] = a[1:]
+                if len(a) > 1:
+                    self.__flags[a[0]] = a[1:]
+                else:
+                    self.__flags[a[0]] = a[0]
             elif not silent:
                 print("Failed to add '"+str(a)+"', it's not a "+type(self).__name__+".f flag")
         pass
@@ -36,7 +39,7 @@ class cli:
         pass
 
     def run(self, *in_args):
-        args = [self.__cmd]
+        args = [*self.__cmd]
         args.extend(self.__g_flags)
         for k in self.__flags:
             val = self.__flags[k]

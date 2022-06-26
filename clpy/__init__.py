@@ -27,10 +27,10 @@ class cli_{cmd}(cli.cli):
     \"\"\"
 {usage}{docargs}{docflags}
     \"\"\"
-    __g_flags = {g_flags}
-    __cmd = "{cmd}"
     __options = pickle.load(open(os.path.join(curdir, "{cmd}_options.pkl"), "rb"))
     def __init__(self, *in_flags):
+        self.__cmd = ["{cmd}"]
+        self.__g_flags = {g_flags}
         super().__init__(self.__cmd, self.__options, self.__g_flags, *in_flags)
         pass
 
@@ -483,9 +483,9 @@ def main():
     parser.add_argument("-t7", "--test7", nargs="A...", help="test: nargs should be A...")
     parser.add_argument("-t8", "--test8", choices=["1st", "2nd", "3rd"], help="test: there should be 3 choices")
     
-    args = parser.parse_args()
-    
+    args = parser.parse_args()    
     help_text = subprocess.getoutput(args.command+" --help").split("\n")
+    
     if args.debug:
         prologue, unused, options, usage = parse(help_text)
         debug_print(prologue, unused, options, usage, "help", args.verbose, args.no_bad_matches)
