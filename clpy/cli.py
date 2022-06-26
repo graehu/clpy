@@ -1,6 +1,6 @@
 import subprocess
 
-silent = False
+silent = True
 
 class cli:
     """
@@ -50,5 +50,5 @@ class cli:
         args.extend(in_args)
         if not silent:
             print("Running: '"+" ".join(args)+"'")
-        subprocess.run(args)
-        pass
+
+        return subprocess.check_output(args).decode("utf-8")
