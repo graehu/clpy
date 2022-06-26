@@ -1,4 +1,5 @@
 __pycache__/
 clpy/cli_*.py
 clpy/*_options.pkl
+clpy/debug_help.txt
 *.*~

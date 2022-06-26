@@ -11,14 +11,14 @@ program_name = "clpy"
 description = """Convert a CLI to a python module."""
 version = "0.0.1"
 
-curdir = os.path.dirname(__file__)
+clpydir = os.path.dirname(__file__)
 
 flag_name = "f"
 # man_text = subprocess.getoutput("man -P cat "+args.command).split("\n")
 # todo: It might be better to have a base class + kwargs
 class_fmt = """# clpy generated, do not modify by hand
 import clpy.cli as cli
-from clpy import curdir
+from clpy import clpydir
 import pickle
 import os
 from enum import Enum, auto
@@ -27,7 +27,7 @@ class cli_{cmd}(cli.cli):
     \"\"\"
 {usage}{docargs}{docflags}
     \"\"\"
-    __options = pickle.load(open(os.path.join(curdir, "{cmd}_options.pkl"), "rb"))
+    __options = pickle.load(open(os.path.join(clpydir, "{cmd}_options.pkl"), "rb"))
     def __init__(self, *in_flags):
         self.__cmd = ["{cmd}"]
         self.__g_flags = {g_flags}
@@ -69,6 +69,7 @@ class OptionMeta:
             out.append("usage:".ljust(just)+option.usage)
             if option.bad_match: out.append("bad_match:".ljust(just)+str(option.bad_match)+": "+option.bad_match_reason)
             if option.wants_equals: out.append("equals: ".ljust(just)+str(option.wants_equals))
+            if option.is_positional: out.append("is_positional: ".ljust(just)+str(option.is_positional))
         if option.switch:
             out.append("switch:".ljust(just)+str(option.switch.groups()[0]))
         if option.nargs:
@@ -322,15 +323,23 @@ def parse_option(line, pos, line_num, match):
     option.is_positional = not option.children and not option.nargs and not option.switch.group(1).startswith("-")
     return option, pos
 
-def parse(text, iterative=False):
-    
+def parse_man(text, line_num = 0):
+    start = text.index("SYNOPSIS")+1
+    end = text.index("DESCRIPTION")
+    # adding usage to better match what parse_usage expects
+    text[start] = "Usage: "+text[start].lstrip()
+    usage, _, _ = parse_usage(text, line_num = start)
+    print(usage.match.groups()[0])
+    print([o.name for o in usage.options])
+    pass
+
+def parse_usage(text, line_num = 0):
     # Parse usage    
     usage = None
-    line_num = 0
     argument = None
-    
+    start = line_num
     # Only checking the first 32 lines.
-    for line in text[:32]:
+    for line in text[start:32]:
         line_num += 1
         pos = 0
         if not usage and (not (match := reg.usage.search(line[pos:]))):
@@ -383,6 +392,9 @@ def parse(text, iterative=False):
     else:
         line_num -= 1
 
+    return usage, start, line_num
+
+def parse_help(text, line_num=0, iterative=False):
     # Parse Options
     option = None
     prologue = []
@@ -390,8 +402,9 @@ def parse(text, iterative=False):
     options = []
     # hack, stops us blocking legitimate names found in usage.
     Option.all_names = {}
+    start = line_num
     
-    for line in text[line_num:]:
+    for line in text[start:]:
         line_num += 1
         pos = 0
         while(line[pos:]):
@@ -444,7 +457,7 @@ def parse(text, iterative=False):
                 option = None
                 unused.append(line)
     
-    return prologue, unused, options, usage
+    return prologue, unused, options
 
 def options_str_list(options, tab = 4, length = 64):
     lines = [",".join([o.name, *[c.name for c in o.children]]) for o in options]
@@ -483,17 +496,26 @@ def main():
     parser.add_argument("-t7", "--test7", nargs="A...", help="test: nargs should be A...")
     parser.add_argument("-t8", "--test8", choices=["1st", "2nd", "3rd"], help="test: there should be 3 choices")
     
-    args = parser.parse_args()    
+    args = parser.parse_args()
     help_text = subprocess.getoutput(args.command+" --help").split("\n")
-    
+    is_man_page = "NAME" in help_text and "SYNOPSIS" in help_text
     if args.debug:
-        prologue, unused, options, usage = parse(help_text)
-        debug_print(prologue, unused, options, usage, "help", args.verbose, args.no_bad_matches)
+        if  is_man_page:
+            parse_man(help_text)
+        else:
+            usage, _, line_num = parse_usage(help_text)
+            prologue, unused, options = parse_help(help_text, line_num=line_num)
+            debug_print(prologue, unused, options, usage, "help", args.verbose, args.no_bad_matches)
+            open(os.path.join(clpydir, "debug_help.txt"), "w").write("\n".join(help_text))
     else:
-        generate_module_from_help(help_text, args.globals)
+        if is_man_page:
+            print("man pages are not supported yet.")
+        else:
+            generate_module_from_help(help_text, args.globals)
         
 def generate_module_from_help(help_text, defaults):
-    _, _, options, usage = parse(help_text)
+    usage, _, line_num = parse_usage(help_text)
+    _, _, options = parse_help(help_text, line_num=line_num)
 
     # Filter out bad options etc.
     positional = [o for o in options if not o.bad_match and o.is_positional]
@@ -508,7 +530,7 @@ def generate_module_from_help(help_text, defaults):
 
     # Generate options.pkl
     cmd = usage.match.groups()[0]
-    pickle.dump(option_dict, open(os.path.join(curdir,f"{cmd}_options.pkl"), "wb"))
+    pickle.dump(option_dict, open(os.path.join(clpydir,f"{cmd}_options.pkl"), "wb"))
 
 
     length = 64
@@ -549,7 +571,7 @@ def generate_module_from_help(help_text, defaults):
 
     g_flags = defaults if defaults else []
     init = class_fmt.format(cmd=cmd, usage=usage, docflags=docflags, docargs=docargs, enum=enums, g_flags=g_flags, f=flag_name)
-    open(os.path.join(curdir, f"cli_{cmd}.py"), "w").write(init)
+    open(os.path.join(clpydir, f"cli_{cmd}.py"), "w").write(init)
 
 if __name__ == "__main__":
     main()

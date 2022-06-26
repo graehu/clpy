@@ -53,5 +53,10 @@ class cli:
         args.extend(in_args)
         if not silent:
             print("Running: '"+" ".join(args)+"'")
-
-        return subprocess.check_output(args).decode("utf-8")
+        ret = None
+        try:
+            ret = subprocess.check_output(args).decode("utf-8")
+        except subprocess.CalledProcessError as e:
+            if not silent:
+                print("CalledProcessError: "+str(e))
+        return ret
