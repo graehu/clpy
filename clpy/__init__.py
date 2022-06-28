@@ -323,21 +323,31 @@ def parse_option(line, pos, line_num, match):
     option.is_positional = not option.children and not option.nargs and not option.switch.group(1).startswith("-")
     return option, pos
 
+
 def parse_man(text, line_num = 0):
-    start = text.index("SYNOPSIS")+1
-    end = text.index("DESCRIPTION")
+    id_synopsis = text.index("SYNOPSIS")
+    id_description = text.index("DESCRIPTION")
+    start = id_synopsis+1
+    end = id_description
+    re_title = re.compile("^[A-Z]+")
     # adding usage to better match what parse_usage expects
     text[start] = "Usage: "+text[start].lstrip()
     usage, _, _ = parse_usage(text, line_num = start)
-    print(usage.match.groups()[0])
-    print([o.name for o in usage.options])
-    pass
+    # todo: this will cause a lot of false positives.
+    # it might be better to do this section by section
+    # throwing away sections with high bad-matches or
+    # only positional options.
+    _, _, options = parse_help(text, end)
+    
+    
+    return usage, options
 
 def parse_usage(text, line_num = 0):
     # Parse usage    
     usage = None
     argument = None
     start = line_num
+    num_options = 0
     # Only checking the first 32 lines.
     for line in text[start:32]:
         line_num += 1
@@ -501,7 +511,10 @@ def main():
     is_man_page = "NAME" in help_text and "SYNOPSIS" in help_text
     if args.debug:
         if  is_man_page:
-            parse_man(help_text)
+            usage, options = parse_man(help_text)
+            debug_print([], [], options, usage, "man", args.verbose, args.no_bad_matches)
+            open(os.path.join(clpydir, "debug_help.txt"), "w").write("\n".join(help_text))
+            # generate_module(usage, options, args.globals)
         else:
             usage, _, line_num = parse_usage(help_text)
             prologue, unused, options = parse_help(help_text, line_num=line_num)
@@ -509,14 +522,16 @@ def main():
             open(os.path.join(clpydir, "debug_help.txt"), "w").write("\n".join(help_text))
     else:
         if is_man_page:
-            print("man pages are not supported yet.")
+            usage, options = parse_man(help_text)
+            generate_module(usage, options, args.globals)
         else:
-            generate_module_from_help(help_text, args.globals)
-        
-def generate_module_from_help(help_text, defaults):
-    usage, _, line_num = parse_usage(help_text)
-    _, _, options = parse_help(help_text, line_num=line_num)
+            usage, _, line_num = parse_usage(help_text)
+            _, _, options = parse_help(help_text, line_num=line_num)
+            generate_module(usage, options, args.globals)
 
+
+    
+def generate_module(usage, options, defaults):
     # Filter out bad options etc.
     positional = [o for o in options if not o.bad_match and o.is_positional]
     options = [o for o in options if not o.bad_match and not o.is_positional]
