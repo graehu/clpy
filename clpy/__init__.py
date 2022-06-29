@@ -324,7 +324,7 @@ def parse_option(line, pos, line_num, match):
     return option, pos
 
 
-def parse_man(text, line_num = 0):
+def parse_man(text, start = 0):
     id_synopsis = text.index("SYNOPSIS")
     id_description = text.index("DESCRIPTION")
     start = id_synopsis+1
@@ -332,21 +332,42 @@ def parse_man(text, line_num = 0):
     re_title = re.compile("^[A-Z]+")
     # adding usage to better match what parse_usage expects
     text[start] = "Usage: "+text[start].lstrip()
-    usage, _, _ = parse_usage(text, line_num = start)
-    # todo: this will cause a lot of false positives.
-    # it might be better to do this section by section
-    # throwing away sections with high bad-matches or
-    # only positional options.
-    _, _, options = parse_help(text, end)
+    usage, _, _ = parse_usage(text, start=start)
+    sections = []
+    start = end
+    for line in text[start:]:
+        if match := re_title.search(line):
+            sections.append((start, end))
+            start = end
+        end += 1
+        
+    # todo: throw out sections with bad ratios of bad match options.
+    # atm, if it's positional, check if it's in usage, if not, throw it out.
+    options = []
+    # print([o.switch.groups()[0] for o in usage.options])
+    for start, end in sections:
+        _, _, out_options = parse_help(text, start, end)
+        for option in out_options:
+            if option.is_positional:
+                # print(option.switch.groups())
+                if option.switch.groups()[0] in [o.switch.groups()[0] for o in usage.options]:
+                    # print("adding positional!")
+                    options.append(option)
+                else:
+                    # print("failed to add '"+option.switch.groups()[0]+"' it's not in usage.")
+                    pass
+            else:
+                options.append(option)
+            pass
     
     
     return usage, options
 
-def parse_usage(text, line_num = 0):
+def parse_usage(text, start = 0):
     # Parse usage    
     usage = None
     argument = None
-    start = line_num
+    line_num = start
     num_options = 0
     # Only checking the first 32 lines.
     for line in text[start:32]:
@@ -404,7 +425,7 @@ def parse_usage(text, line_num = 0):
 
     return usage, start, line_num
 
-def parse_help(text, line_num=0, iterative=False):
+def parse_help(text, start=0, end=0, iterative=False):
     # Parse Options
     option = None
     prologue = []
@@ -412,9 +433,10 @@ def parse_help(text, line_num=0, iterative=False):
     options = []
     # hack, stops us blocking legitimate names found in usage.
     Option.all_names = {}
-    start = line_num
+    line_num = start
+    end = len(text) if end == 0 else end
     
-    for line in text[start:]:
+    for line in text[start:end]:
         line_num += 1
         pos = 0
         while(line[pos:]):
@@ -449,7 +471,7 @@ def parse_help(text, line_num=0, iterative=False):
                 pos = len(line) - len(line.lstrip())
                 if pos > option.span[0]:
                     pos = len(line)
-                    option.lines.append([line_num, line])
+                    option.lines.append((line_num, line))
                     stripped = line.strip()
                     if stripped:
                         option.doc.append(stripped)
@@ -508,16 +530,16 @@ def main():
     
     args = parser.parse_args()
     help_text = subprocess.getoutput(args.command+" --help").split("\n")
+
     is_man_page = "NAME" in help_text and "SYNOPSIS" in help_text
     if args.debug:
         if  is_man_page:
             usage, options = parse_man(help_text)
             debug_print([], [], options, usage, "man", args.verbose, args.no_bad_matches)
             open(os.path.join(clpydir, "debug_help.txt"), "w").write("\n".join(help_text))
-            # generate_module(usage, options, args.globals)
         else:
-            usage, _, line_num = parse_usage(help_text)
-            prologue, unused, options = parse_help(help_text, line_num=line_num)
+            usage, _, start = parse_usage(help_text)
+            prologue, unused, options = parse_help(help_text, start=start)
             debug_print(prologue, unused, options, usage, "help", args.verbose, args.no_bad_matches)
             open(os.path.join(clpydir, "debug_help.txt"), "w").write("\n".join(help_text))
     else:
@@ -525,8 +547,8 @@ def main():
             usage, options = parse_man(help_text)
             generate_module(usage, options, args.globals)
         else:
-            usage, _, line_num = parse_usage(help_text)
-            _, _, options = parse_help(help_text, line_num=line_num)
+            usage, _, start = parse_usage(help_text)
+            _, _, options = parse_help(help_text, start=start)
             generate_module(usage, options, args.globals)
 
 
