@@ -29,7 +29,7 @@ class cli_{cmd}(cli.cli):
     \"\"\"
     __options = pickle.load(open(os.path.join(clpydir, "{cmd}_options.pkl"), "rb"))
     def __init__(self, *in_flags):
-        self.__cmd = ["{cmd}"]
+        self.__cmd = {usage_cmd}
         self.__g_flags = {g_flags}
         super().__init__(self.__cmd, self.__options, self.__g_flags, *in_flags)
         pass
@@ -194,17 +194,16 @@ class Option:
         }
 
 class Usage:
+    cmd = None
     match = None
     matches = None
     options = None
-    positional = None
     lines = None
 
     def __init__(self):
         self.lines = []
         self.matches = []
         self.options = []
-        self.positional = []
 
         
         
@@ -263,6 +262,13 @@ def parse_option(line, pos, line_num, match):
 
         # Handle child options
         elif match := reg.switch.search(line[pos:]):
+            if child.option_depth:
+                # throw this child out,
+                # it's not a part of this option.
+                child.bad_match = True
+                child.bad_match_reason = "attempted optional child switch, not supported."
+                child.option_depth = 0
+                break
             option_add_nargs(child)
             child = Option()
             option.children.append(child)
@@ -319,6 +325,9 @@ def parse_option(line, pos, line_num, match):
             o.bad_match = True
             o.bad_match_reason = f"The name '{o.name}' already exists"
             # todo: consider appending doc strings or something?
+        if not o.name:
+            o.bad_match = True
+            o.bad_match_reason = f"The name was empty!"
         pass
     option.is_positional = not option.children and not option.nargs and not option.switch.group(1).startswith("-")
     return option, pos
@@ -335,9 +344,14 @@ def parse_man(text, start = 0):
     usage, _, _ = parse_usage(text, start=start)
     sections = []
     start = end
+    current = ""
     for line in text[start:]:
         if match := re_title.search(line):
-            sections.append((start, end))
+            if current not in ["EXAMPLES"]:
+                sections.append((start, end))
+                current = line
+            else:
+                current = line
             start = end
         end += 1
         
@@ -385,7 +399,7 @@ def parse_usage(text, start = 0):
                 match = usage.match
 
             usage.lines.append((line_num, line))
-            
+
             while(line[pos:]):
                 if match:
                     pos += match.span()[1]
@@ -399,7 +413,10 @@ def parse_usage(text, start = 0):
                     match = None
                     
                 elif match := reg.argument.search(line[pos:]):
-                    usage.positional.append(match)
+                    option, pos = parse_option(line, pos, line_num, match)
+                    option.doc = None
+                    usage.options.append(option)
+                    match = None
 
                 # Handle outer brackets
                 elif match := reg.start_optional.search(line[pos:]): pass
@@ -423,6 +440,21 @@ def parse_usage(text, start = 0):
     else:
         line_num -= 1
 
+    cmd = []
+    
+    for option in usage.options:
+        # print(option.switch.groups()[0]+" "+str(option.option_depth))
+        # print(option.is_positional)
+        if option.is_positional and option.option_depth == 0:
+            cmd.append(option)
+            pass
+        else:
+            break
+    # print(cmd)
+    usage.options = [o for o in usage.options if o not in cmd]
+    cmd = [usage.match, *[o.switch for o in cmd]]
+    usage.cmd = [o.groups()[0] for o in cmd]
+    # print(usage.cmd)
     return usage, start, line_num
 
 def parse_help(text, start=0, end=0, iterative=False):
@@ -566,7 +598,8 @@ def generate_module(usage, options, defaults):
     for o in options: option_dict = {**o.to_dict(), **option_dict}
 
     # Generate options.pkl
-    cmd = usage.match.groups()[0]
+    cmd = "_".join(usage.cmd)
+    usage_cmd = usage.cmd
     pickle.dump(option_dict, open(os.path.join(clpydir,f"{cmd}_options.pkl"), "wb"))
 
 
@@ -607,7 +640,7 @@ def generate_module(usage, options, defaults):
     else: enums = ""
 
     g_flags = defaults if defaults else []
-    init = class_fmt.format(cmd=cmd, usage=usage, docflags=docflags, docargs=docargs, enum=enums, g_flags=g_flags, f=flag_name)
+    init = class_fmt.format(cmd=cmd, usage_cmd=usage_cmd, usage=usage, docflags=docflags, docargs=docargs, enum=enums, g_flags=g_flags, f=flag_name)
     open(os.path.join(clpydir, f"cli_{cmd}.py"), "w").write(init)
 
 if __name__ == "__main__":
