@@ -33,7 +33,12 @@ class cli_{cmd}(cli.cli):
         self.__g_flags = {g_flags}
         super().__init__(self.__cmd, self.__options, self.__g_flags, *in_flags)
         pass
-
+    def add_flags(self, *in_flags):
+        \"\"\"
+{docflags2}
+        \"\"\"
+        super().add_flags(self, *in_flags)
+        pass
     class {f}(Enum):
 {enum}
         pass
@@ -617,13 +622,16 @@ def generate_module(usage, options, defaults):
     else: docargs = ""
 
     docflags = options_str_list(options, tab, length)
+    docflags2 = ""
     if docflags:
         docflags = ["All available flags:",
                     "".ljust(length, "-"),
                     *docflags, ""]
+        docflags2 = docflags
         docflags = "".ljust(tab)+"\n".ljust(tab+1).join(docflags)
+        docflags2 = "".ljust(tab*2)+"\n".ljust((tab*2)+1).join(docflags2)
     else: docflags = ""
-
+    
     # Generate enums
     if docflags:
         enums = []
@@ -640,7 +648,17 @@ def generate_module(usage, options, defaults):
     else: enums = ""
 
     g_flags = defaults if defaults else []
-    init = class_fmt.format(cmd=cmd, usage_cmd=usage_cmd, usage=usage, docflags=docflags, docargs=docargs, enum=enums, g_flags=g_flags, f=flag_name)
+    init = class_fmt.format(
+        cmd=cmd,
+        usage_cmd=usage_cmd,
+        usage=usage,
+        docflags=docflags,
+        docargs=docargs,
+        enum=enums,
+        g_flags=g_flags,
+        f=flag_name,
+        docflags2=docflags2
+    )
     open(os.path.join(clpydir, f"cli_{cmd}.py"), "w").write(init)
 
 def update_cli():
