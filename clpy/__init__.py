@@ -582,7 +582,7 @@ def main():
             usage, _, start = parse_usage(help_text)
             _, _, options = parse_help(help_text, start=start)
             generate_module(usage, options, args.globals)
-
+        update_cli()
 
     
 def generate_module(usage, options, defaults):
@@ -643,5 +643,14 @@ def generate_module(usage, options, defaults):
     init = class_fmt.format(cmd=cmd, usage_cmd=usage_cmd, usage=usage, docflags=docflags, docargs=docargs, enum=enums, g_flags=g_flags, f=flag_name)
     open(os.path.join(clpydir, f"cli_{cmd}.py"), "w").write(init)
 
+def update_cli():
+    modules = os.listdir(clpydir)
+    modules = [m[:-3] for m in modules if m.startswith("cli_") and m.endswith(".py")]
+    modules = [f"from clpy.{m} import {m} as {m[4:]}" for m in modules]
+    modules = sorted(modules)
+    with open(os.path.join(clpydir, "cli.py"), "w") as cli_out:
+        cli_out.write("\n".join(modules))
+        pass
+    
 if __name__ == "__main__":
     main()
