@@ -57,5 +57,5 @@ class cli:
         try:
             return subprocess.run(args, capture_output=True, text=True, check=True)
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(e.stderr) from e
+            raise RuntimeError(f"Running '{' '.join(e.cmd)}' returned {e.returncode}"+"\n\n"+e.stderr) from e
 
