@@ -1,4 +1,5 @@
 import subprocess
+from clpy import generate
 
 silent = True
 
@@ -17,6 +18,10 @@ class cli:
         self.__g_flags = g_flags
         self.__flags = dict()
         self.add_flags(*in_flags)
+        pass
+    
+    def __regenerate__(self):
+        generate(" ".join(self.__cmd), self.__g_flags)
         pass
 
     def add_flags(self, *in_flags):

@@ -446,19 +446,19 @@ def parse_usage(text, start = 0):
         line_num -= 1
 
     cmd = []
-    
-    for option in usage.options:
-        # print(option.switch.groups()[0]+" "+str(option.option_depth))
-        # print(option.is_positional)
-        if option.is_positional and option.option_depth == 0:
-            cmd.append(option)
-            pass
-        else:
-            break
-    # print(cmd)
-    usage.options = [o for o in usage.options if o not in cmd]
-    cmd = [usage.match, *[o.switch for o in cmd]]
-    usage.cmd = [o.groups()[0] for o in cmd]
+    if usage:
+        for option in usage.options:
+            # print(option.switch.groups()[0]+" "+str(option.option_depth))
+            # print(option.is_positional)
+            if option.is_positional and option.option_depth == 0:
+                cmd.append(option)
+                pass
+            else:
+                break
+        # print(cmd)
+        usage.options = [o for o in usage.options if o not in cmd]
+        cmd = [usage.match, *[o.switch for o in cmd]]
+        usage.cmd = [o.groups()[0] for o in cmd]
     # print(usage.cmd)
     return usage, start, line_num
 
@@ -566,31 +566,39 @@ def main():
     parser.add_argument("-t8", "--test8", choices=["1st", "2nd", "3rd"], help="test: there should be 3 choices")
     
     args = parser.parse_args()
-    help_text = subprocess.getoutput(args.command+" --help").split("\n")
+    if args.command == "update_clpy":
+        __regenerate_all__()        
+    else:
+        generate(args.command, args.globals, args.debug)
 
+def generate(cmd, defaults=None, debug=False):
+    help_text = subprocess.getoutput(cmd+" --help").split("\n")
     is_man_page = "NAME" in help_text and "SYNOPSIS" in help_text
-    if args.debug:
+    if debug:
         if  is_man_page:
             usage, options = parse_man(help_text)
-            debug_print([], [], options, usage, "man", args.verbose, args.no_bad_matches)
+            debug_print([], [], options, usage, "man", True, False)
             open(os.path.join(clpydir, "debug_help.txt"), "w").write("\n".join(help_text))
         else:
             usage, _, start = parse_usage(help_text)
             prologue, unused, options = parse_help(help_text, start=start)
-            debug_print(prologue, unused, options, usage, "help", args.verbose, args.no_bad_matches)
+            debug_print(prologue, unused, options, usage, "help", True, False)
             open(os.path.join(clpydir, "debug_help.txt"), "w").write("\n".join(help_text))
     else:
         if is_man_page:
             usage, options = parse_man(help_text)
-            generate_module(usage, options, args.globals)
+            generate_module(usage, options, defaults)
         else:
             usage, _, start = parse_usage(help_text)
             _, _, options = parse_help(help_text, start=start)
-            generate_module(usage, options, args.globals)
+            generate_module(usage, options, defaults)
         update_cli()
 
     
 def generate_module(usage, options, defaults):
+    if not usage or not options:
+        return
+        
     # Filter out bad options etc.
     positional = [o for o in options if not o.bad_match and o.is_positional]
     options = [o for o in options if not o.bad_match and not o.is_positional]
@@ -669,6 +677,14 @@ def update_cli():
     with open(os.path.join(clpydir, "cli.py"), "w") as cli_out:
         cli_out.write("\n".join(modules))
         pass
-    
+
+def __regenerate_all__():
+    modules = os.listdir(clpydir)
+    modules = [m[:-3] for m in modules if m.startswith("cli_") and m.endswith(".py")]
+    modules = [f"from clpy.{m} import {m} as {m[4:]}\n{m[4:]}().__regenerate__()" for m in modules]
+    modules = sorted(modules)
+    for m in modules:
+        exec(m)
+
 if __name__ == "__main__":
     main()
