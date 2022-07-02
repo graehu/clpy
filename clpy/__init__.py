@@ -17,7 +17,7 @@ flag_name = "f"
 # man_text = subprocess.getoutput("man -P cat "+args.command).split("\n")
 # todo: It might be better to have a base class + kwargs
 class_fmt = """# clpy generated, do not modify by hand
-import clpy.cli as cli
+import clpy.__cli__ as cli
 from clpy import clpydir
 import pickle
 import os
