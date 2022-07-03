@@ -317,23 +317,13 @@ def parse_option(line, pos, line_num, match):
     opt_usage, doc = line[option.span[0]:pos], line[pos:]
     if doc.strip(): option.doc.append(doc.strip())
     option.usage = opt_usage.strip()
+
     for o in [option, *option.children]:
         o.name = o.switch.group(1).lstrip("-")
         o.name = o.name.replace("-", "_")
         if o.name in keyword.kwlist: o.name = o.name+"_"
         if o.name in dir(builtins): o.name = o.name+"_"
-        o.name = o.name
-        if o.name not in Option.all_names:
-            Option.all_names[o.name] = o
-        else:
-            # we can't allow two flags with the same name
-            o.bad_match = True
-            o.bad_match_reason = f"The name '{o.name}' already exists"
-            # todo: consider appending doc strings or something?
-        if not o.name:
-            o.bad_match = True
-            o.bad_match_reason = f"The name was empty!"
-        pass
+        
     option.is_positional = not option.children and not option.nargs and not option.switch.group(1).startswith("-")
     return option, pos
 
@@ -364,6 +354,7 @@ def parse_man(text, start = 0):
     # atm, if it's positional, check if it's in usage, if not, throw it out.
     options = []
     # print([o.switch.groups()[0] for o in usage.options])
+    Option.all_names = {}
     for start, end in sections:
         _, _, out_options = parse_help(text, start, end)
         for option in out_options:
@@ -462,14 +453,60 @@ def parse_usage(text, start = 0):
     # print(usage.cmd)
     return usage, start, line_num
 
+def validate_option(option):
+    if not option:
+        return
+    
+    if not option.doc:
+        option.bad_match = True
+        option.bad_match_reason = "Couldn't find a doc string."
+    # elif option and option.lines:
+    #     start = option.lines[0][0]
+    #     last = -1
+    #     for oline in option.lines:
+    #         if last != (oline[0]-start)-1:
+    #             option.bad_match = True
+    #             option.bad_match_reason = "Unexpected line break."
+    #             break
+    #         last = oline[0]-start
+    #         pass
+    #     pass
+    else:
+        names = []
+        for o in [option, *option.children]:
+            if o.name not in names:
+                names.append(o.name)
+            else:
+                option.bad_match = True
+                option.bad_match_reason = f"{o.name} is a repeated name in children"
+                break
+
+            if o.name in Option.all_names:
+                # we can't allow two flags with the same name
+                option.bad_match = True
+                option.bad_match_reason = f"The name '{o.name}' already exists"
+                break
+                # todo: consider appending doc strings or something?
+            if not o.name:
+                option.bad_match = True
+                option.bad_match_reason = f"The name was empty!"
+                break
+
+    if not option.bad_match:
+        for o in [option, *option.children]:
+            Option.all_names[o.name] = o
+            pass
+    else:
+        for o in option.children:
+            o.bad_match = True
+            o.bad_match_reason = "Bad parent"
+
 def parse_help(text, start=0, end=0, iterative=False):
     # Parse Options
     option = None
     prologue = []
     unused = []
     options = []
-    # hack, stops us blocking legitimate names found in usage.
-    Option.all_names = {}
     line_num = start
     end = len(text) if end == 0 else end
     
@@ -486,11 +523,7 @@ def parse_help(text, start=0, end=0, iterative=False):
                 if match := reg.switch.search(line[pos:]): pass
                 elif match := reg.argument.search(line[pos:]): pass
                 if match:
-                    # Not finding docs is a bad sign.
-                    if option and not option.doc:
-                        option.bad_match = True
-                        option.bad_match_reason = "Couldn't find a doc string."
-
+                    # validate_option(option)
                     option, pos = parse_option(line, pos, line_num, match)
                     options.append(option)
 
@@ -526,6 +559,9 @@ def parse_help(text, start=0, end=0, iterative=False):
                 option = None
                 unused.append(line)
     
+    # if options:
+    for o in options: validate_option(o)
+        
     return prologue, unused, options
 
 def options_str_list(options, tab = 4, length = 64):
@@ -581,6 +617,7 @@ def generate(cmd, defaults=None, debug=False):
             open(os.path.join(clpydir, "debug_help.txt"), "w").write("\n".join(help_text))
         else:
             usage, _, start = parse_usage(help_text)
+            Option.all_names = {}
             prologue, unused, options = parse_help(help_text, start=start)
             debug_print(prologue, unused, options, usage, "help", True, False)
             open(os.path.join(clpydir, "debug_help.txt"), "w").write("\n".join(help_text))
@@ -590,6 +627,7 @@ def generate(cmd, defaults=None, debug=False):
             generate_module(usage, options, defaults)
         else:
             usage, _, start = parse_usage(help_text)
+            Option.all_names = {}
             _, _, options = parse_help(help_text, start=start)
             generate_module(usage, options, defaults)
         update_cli()
