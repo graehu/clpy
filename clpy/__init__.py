@@ -52,6 +52,7 @@ class reg:
     end_optional = re.compile("^ ?\]")
     start_enum = re.compile("^ ?\{")
     end_enum = re.compile("^ ?\}")
+    g_flag = re.compile("\s+(--?[A-Za-z0-9\-#_]+)(?:\s+|=|,|\[=|$)")
     switch = re.compile("^(?:\s+)?(--?[A-Za-z0-9\-#_]+)")
     has_arg = re.compile("^\s{2,8}(?!---)(-{0,2}[A-Z])", re.IGNORECASE)
     argument = re.compile("^(?: |=)?((?!-)<?[A-Za-z0-9\-#_]+>?)")
@@ -177,6 +178,7 @@ class Option:
     option_depth = 0
     enum_depth = 0
     all_names = {}
+    valid_flags = []
     is_parent = False
     is_positional = False
 
@@ -229,6 +231,12 @@ def option_add_nargs(option):
     elif ellipsis:
         option.nargs = "..."
 
+def sanatise_name(flag):
+    flag = flag.lstrip("-")
+    flag = flag.replace("-", "_")
+    if flag in keyword.kwlist: flag = flag+"_"
+    if flag in dir(builtins): flag = flag+"_"
+    return flag
 
 def parse_option(line, pos, line_num, match):
     option = Option()
@@ -301,7 +309,7 @@ def parse_option(line, pos, line_num, match):
             # Reverting to start pos.
             pos = option.span[1]
             option.bad_match = True
-            option.bad_match_reason = "Couldn't find a valid match"
+            option.bad_match_reason = f"No regex to match '{line[pos:]}'"
             break
 
     option_add_nargs(child)
@@ -319,10 +327,7 @@ def parse_option(line, pos, line_num, match):
     option.usage = opt_usage.strip()
 
     for o in [option, *option.children]:
-        o.name = o.switch.group(1).lstrip("-")
-        o.name = o.name.replace("-", "_")
-        if o.name in keyword.kwlist: o.name = o.name+"_"
-        if o.name in dir(builtins): o.name = o.name+"_"
+        o.name = sanatise_name(o.switch.group(1))
         
     option.is_positional = not option.children and not option.nargs and not option.switch.group(1).startswith("-")
     return option, pos
@@ -486,11 +491,19 @@ def validate_option(option):
                 option.bad_match = True
                 option.bad_match_reason = f"The name '{o.name}' already exists"
                 break
-                # todo: consider appending doc strings or something?
+
+            if o.switch.groups():
+                switch = o.switch.groups()[0]
+                if switch not in Option.valid_flags:
+                    option.bad_match = True
+                    option.bad_match_reason = f"Flag '{switch}' not in the valid list"
+            
+            # todo: consider appending doc strings or something?
             if not o.name:
                 option.bad_match = True
                 option.bad_match_reason = f"The name was empty!"
                 break
+            
 
     if not option.bad_match:
         for o in [option, *option.children]:
@@ -559,8 +572,25 @@ def parse_help(text, start=0, end=0, iterative=False):
                 option = None
                 unused.append(line)
     
-    # if options:
     for o in options: validate_option(o)
+    if len(Option.all_names) < len(Option.valid_flags):
+        found = [v.switch.groups()[0] for v in Option.all_names.values()]
+        for flag in Option.valid_flags:
+            if flag not in found:
+                for o in options:
+                    # Try to salvage ones we know should exist.
+                    if o.name == sanatise_name(flag):
+                        o.bad_match = False
+                        # Add a flag to let users know we're not 
+                        # sure how many args there are
+                        # o.nargs = "?..."
+                        o.nargs = None
+                        o.doc = ["Warning: There were errors while parsing this flag.", *o.doc]
+                        o.arguments = []
+                        Option.all_names[o.name] = o
+                    
+
+            pass
         
     return prologue, unused, options
 
@@ -609,6 +639,11 @@ def main():
 
 def generate(cmd, defaults=None, debug=False):
     help_text = subprocess.getoutput(cmd+" --help").split("\n")
+    # easy to understand one liner, amirite
+    matches = [m1 for m2 in [m3 for m3 in [reg.g_flag.findall(l) for l in help_text] if m3] for m1 in m2]
+    matches = sorted(list(set(matches)))
+    Option.valid_flags = matches
+    
     is_man_page = "NAME" in help_text and "SYNOPSIS" in help_text
     if debug:
         if  is_man_page:
