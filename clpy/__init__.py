@@ -48,14 +48,15 @@ class reg:
     usage = re.compile("^(?:usage:) ([A-Z0-9]+)\s+", re.IGNORECASE)
     whitespace = re.compile("^\s")
     ellipsis = re.compile("^ ?\.\.\.")
+    start_trailing = re.compile("^ ?--")
     start_optional = re.compile("^ ?\[")
     end_optional = re.compile("^ ?\]")
     start_enum = re.compile("^ ?\{")
     end_enum = re.compile("^ ?\}")
-    g_flag = re.compile("\s+(--?[A-Za-z0-9\-#_]+)(?:\s+|=|,|\[=|$)")
-    switch = re.compile("^(?:\s+)?(--?[A-Za-z0-9\-#_]+)")
+    g_flag = re.compile("\s+(--?[A-Z0-9][A-Z0-9\-#_]*)(?:\s+|=|,|\[=|$)", re.IGNORECASE)
+    switch = re.compile("^(?:\s+)?(--?[A-Z0-9][A-Z0-9\-#_]*)", re.IGNORECASE)
     has_arg = re.compile("^\s{2,8}(?!---)(-{0,2}[A-Z])", re.IGNORECASE)
-    argument = re.compile("^(?: |=)?((?!-)<?[A-Za-z0-9\-#_]+>?)")
+    argument = re.compile("^(?: |=)?((?!-)<?[A-Z0-9\-#_]+>?)", re.IGNORECASE)
     equals = re.compile("^(=|\[=)")
     comma = re.compile("^, ?")
     or_ = re.compile("^(?: ?\|) ?")
@@ -275,12 +276,16 @@ def parse_option(line, pos, line_num, match):
 
         # Handle child options
         elif match := reg.switch.search(line[pos:]):
+            # print(child.switch.groups()[0])
+            # print([x.to_str() for x in child.arguments])
+            
             if child.option_depth:
                 # throw this child out,
                 # it's not a part of this option.
                 child.bad_match = True
                 child.bad_match_reason = "attempted optional child switch, not supported."
                 child.option_depth = 0
+                # print(match.groups()[0])
                 break
             option_add_nargs(child)
             child = Option()
@@ -300,6 +305,7 @@ def parse_option(line, pos, line_num, match):
         elif match := reg.equals.search(line[pos:]): child.wants_equals = True
         elif match := reg.comma.search(line[pos:]): pass
         elif match := reg.or_.search(line[pos:]): pass
+        elif match := reg.start_trailing.search(line[pos:]): pass
         elif match := reg.stop.search(line[pos:]):
             pos += match.span()[1]
             break
@@ -329,7 +335,7 @@ def parse_option(line, pos, line_num, match):
     for o in [option, *option.children]:
         o.name = sanatise_name(o.switch.group(1))
         
-    option.is_positional = not option.children and not option.nargs and not option.switch.group(1).startswith("-")
+    option.is_positional = not option.children and not option.switch.group(1).startswith("-")
     return option, pos
 
 
