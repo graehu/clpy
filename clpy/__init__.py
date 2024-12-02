@@ -12,26 +12,30 @@ description = """Convert a CLI to a python module."""
 version = "0.0.1"
 
 clpydir = os.path.dirname(__file__)
+clidir =  os.path.join(clpydir, "cli")
 
-flag_name = "f"
+flag_name = "flags"
 # man_text = subprocess.getoutput("man -P cat "+args.command).split("\n")
 # todo: It might be better to have a base class + kwargs
 class_fmt = """# clpy generated, do not modify by hand
 import clpy.__cli__ as cli
-from clpy import clpydir
+from clpy import clidir
 import pickle
 import os
 from enum import Enum, auto
 
-class cli_{cmd}(cli.cli):
+class {f}(Enum):
+{enum}
+
+class runner(cli.cli):
     \"\"\"
 {usage}{docargs}{docflags}
     \"\"\"
-    __options = pickle.load(open(os.path.join(clpydir, "{cmd}_options.pkl"), "rb"))
+    __options = pickle.load(open(os.path.join(clidir, "__{pycmd}_options.pkl"), "rb"))
     def __init__(self, *in_flags):
         self.__cmd = {usage_cmd}
         self.__g_flags = {g_flags}
-        super().__init__(self.__cmd, self.__options, self.__g_flags, *in_flags)
+        super().__init__(self.__cmd, self.__options, type(list(flags)[0]), self.__g_flags, *in_flags)
         pass
     def add_flags(self, *in_flags):
         \"\"\"
@@ -39,13 +43,15 @@ class cli_{cmd}(cli.cli):
         \"\"\"
         super().add_flags(self, *in_flags)
         pass
-    class {f}(Enum):
-{enum}
-        pass
+
+def run(*in_flags):
+    cmd = runner(*in_flags)
+    return cmd.run()
+
 """
 
 class reg:
-    usage = re.compile("^(?:usage:) ([A-Z0-9]+)\s+", re.IGNORECASE)
+    usage = re.compile("^(?:usage:) ([A-Z0-9\+\-]+)\s+", re.IGNORECASE)
     whitespace = re.compile("^\s")
     ellipsis = re.compile("^ ?\.\.\.")
     start_trailing = re.compile("^ ?--")
@@ -692,8 +698,9 @@ def generate_module(usage, options, defaults):
     # Generate options.pkl
     cmd = "_".join(usage.cmd)
     usage_cmd = usage.cmd
-    pickle.dump(option_dict, open(os.path.join(clpydir,f"{cmd}_options.pkl"), "wb"))
+    pycmd = cmd.replace("+", "p").replace("-", "_")
 
+    pickle.dump(option_dict, open(os.path.join(clidir,f"__{pycmd}_options.pkl"), "wb"))
 
     length = 64
     tab = 4
@@ -725,17 +732,19 @@ def generate_module(usage, options, defaults):
         enums.extend([
             (
                 *["# "+d for d in o.doc],
-                "# usage: func("+(f"(cli_{cmd}.{flag_name}.{o.name}, {o.nargs})" if o.nargs else f"cli_{cmd}.{flag_name}.{o.name}")+")",
+                "# usage: func("+(f"({pycmd}.{flag_name}.{o.name}, {o.nargs})" if o.nargs else f"{pycmd}.{flag_name}.{o.name}")+")",
                 *[f"{d.name} = auto()" for d in [o, *[c for c in o.children if not c.bad_match]]]
             ) for o in options if o.is_parent
         ])
-        enums = ["\n"+"\n".ljust(9).join(("", *a)) for a in enums]
-        enums[0] = "".ljust(8)+enums[0].lstrip()
+        
+        enums = ["\n"+"\n".ljust(5).join(("", *a)) for a in enums]
+        enums[0] = "".ljust(4)+enums[0].lstrip()
         enums = "".join(enums)
     else: enums = ""
 
     g_flags = defaults if defaults else []
     init = class_fmt.format(
+        pycmd=pycmd,
         cmd=cmd,
         usage_cmd=usage_cmd,
         usage=usage,
@@ -746,24 +755,25 @@ def generate_module(usage, options, defaults):
         f=flag_name,
         docflags2=docflags2
     )
-    open(os.path.join(clpydir, f"cli_{cmd}.py"), "w").write(init)
+    os.makedirs(clidir, exist_ok=True)
+    open(os.path.join(clidir, f"__{pycmd}__.py"), "w").write(init)
 
 def update_cli():
-    modules = os.listdir(clpydir)
-    modules = [m[:-3] for m in modules if m.startswith("cli_") and m.endswith(".py")]
-    modules = [f"from clpy.{m} import {m} as {m[4:]}" for m in modules]
-    modules = sorted(modules)
-    with open(os.path.join(clpydir, "cli.py"), "w") as cli_out:
-        cli_out.write("\n".join(modules))
-        pass
+    # todo: have this export a file per module, so you end up with:
+    # ----: clpy.gpp.runner, clpy.gpp.flags, clpy.gpp.run
+    modules = os.listdir(clidir)
+    modules = [m[:-3] for m in modules if m.endswith(".py")]
+    for m in modules:
+        outlines = [f"from clpy.cli.{m} import {i}" for i in ["runner", "flags", "run"]]
+        with open(os.path.join(clpydir, m[2:-2]+".py"), "w") as cli_out:
+            cli_out.write("\n".join(outlines))
 
 def __regenerate_all__():
-    modules = os.listdir(clpydir)
-    modules = [m[:-3] for m in modules if m.startswith("cli_") and m.endswith(".py")]
-    modules = [f"from clpy.{m} import {m} as {m[4:]}\n{m[4:]}().__regenerate__()" for m in modules]
+    modules = os.listdir(clidir)
+    modules = [m[:-3] for m in modules if m.endswith(".py")]
+    modules = [f"from clpy.cli.{m} import {m}\n{m}.runner().__regenerate__()" for m in modules]
     modules = sorted(modules)
-    for m in modules:
-        exec(m)
+    for m in modules: exec(m)
 
 if __name__ == "__main__":
     main()

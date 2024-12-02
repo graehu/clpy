@@ -12,10 +12,12 @@ class cli:
     __flags = None
     __cmd = ["echo"]
     __options = None
-    def __init__(self, cmd, options, g_flags, *in_flags):
+    __flag_type = None
+    def __init__(self, cmd, options, flag_type, g_flags, *in_flags):
         self.__cmd = cmd
         self.__options = options
         self.__g_flags = g_flags
+        self.__flag_type = flag_type
         self.__flags = dict()
         self.add_flags(*in_flags)
         pass
@@ -26,15 +28,16 @@ class cli:
 
     def add_flags(self, *in_flags):
         for a in in_flags:
-            if isinstance(a, self.f):
+            if isinstance(a, self.__flag_type):
                 self.__flags[a] = a
-            elif isinstance(a, tuple) and isinstance(a[0], self.f):
+            elif isinstance(a, tuple) and isinstance(a[0], self.__flag_type):
                 if len(a) > 1:
                     self.__flags[a[0]] = a[1:]
                 else:
                     self.__flags[a[0]] = a[0]
+            elif isinstance(a, type(self)): continue
             elif not silent:
-                print("Failed to add '"+str(a)+"', it's not a "+type(self).__name__+".f flag")
+                print(f"Failed to add '{a}', it's not a flag.")
         pass
 
     def del_flags(self, *in_flags):
@@ -50,8 +53,11 @@ class cli:
             val = self.__flags[k]
             if isinstance(val, tuple):
                 val = [str(v) for v in val]
-                join = "=" if self.__options[k.name]["wants_equals"] else " "
-                args.append(self.__options[k.name]["switch"]+join+",".join(val))
+                join = "=" if self.__options[k.name]["wants_equals"] else ""
+                if join:
+                    args.append(self.__options[k.name]["switch"]+join+",".join(val))
+                else:
+                    args.extend([self.__options[k.name]["switch"],join+",".join(val)])
             else:
                 args.append(self.__options[k.name]["switch"])
 
