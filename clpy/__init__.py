@@ -706,25 +706,31 @@ def generate_module(usage, options, defaults):
     tab = 4
     
     usage = ("\n").join(["".ljust(tab)+u[1] for u in [*usage.lines, (None,"")]])+"\n"
-    
-    docargs = options_str_list(positional, tab, length)
-    if docargs:
-        docargs = ["Positional arguments:",
-                   "".ljust(length, "-"),
-                    *docargs, "\n"]
-        docargs = "".ljust(tab)+"\n".ljust(tab+1).join(docargs)
-    else: docargs = ""
+    if len(positional) < 20:
+        docargs = options_str_list(positional, tab, length)
+        if docargs:
+            docargs = ["Positional arguments:",
+                       "".ljust(length, "-"),
+                        *docargs, "\n"]
+            docargs = "".ljust(tab)+"\n".ljust(tab+1).join(docargs)
+        else: docargs = ""
+    else:
+        docargs = "long_args"
 
-    docflags = options_str_list(options, tab, length)
-    docflags2 = ""
-    if docflags:
-        docflags = ["All available flags:",
-                    "".ljust(length, "-"),
-                    *docflags, ""]
-        docflags2 = docflags
-        docflags = "".ljust(tab)+"\n".ljust(tab+1).join(docflags)
-        docflags2 = "".ljust(tab*2)+"\n".ljust((tab*2)+1).join(docflags2)
-    else: docflags = ""
+    if len(options) < 20:
+        docflags = options_str_list(options, tab, length)
+        docflags2 = ""
+        if docflags:
+            docflags = ["All available flags:",
+                        "".ljust(length, "-"),
+                        *docflags, ""]
+            docflags2 = docflags
+            docflags = "".ljust(tab)+"\n".ljust(tab+1).join(docflags)
+            docflags2 = "".ljust(tab*2)+"\n".ljust((tab*2)+1).join(docflags2)
+        else: docflags = ""
+    else:
+        docflags = "".ljust(tab)+f"see {pycmd}.flags for all {len(options)} options."
+        docflags2 = "".ljust(tab*2)+f"see {pycmd}.flags for all {len(options)} options."
     
     # Generate enums
     if docflags:
