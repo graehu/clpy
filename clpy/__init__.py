@@ -12,7 +12,7 @@ description = """Convert a CLI to a python module."""
 version = "0.0.1"
 
 clpydir = os.path.dirname(__file__)
-clidir =  os.path.join(clpydir, "cli")
+clidir =  os.path.join(clpydir, "__cli__")
 
 flag_name = "flags"
 # man_text = subprocess.getoutput("man -P cat "+args.command).split("\n")
@@ -31,7 +31,7 @@ class runner(cli.cli):
     \"\"\"
 {usage}{docargs}{docflags}
     \"\"\"
-    __options = pickle.load(open(os.path.join(clidir, "__{pycmd}_options.pkl"), "rb"))
+    __options = pickle.load(open(os.path.join(clidir, "{pycmd}_options.pkl"), "rb"))
     def __init__(self, *in_flags):
         self.__cmd = {usage_cmd}
         self.__g_flags = {g_flags}
@@ -700,7 +700,7 @@ def generate_module(usage, options, defaults):
     usage_cmd = usage.cmd
     pycmd = cmd.replace("+", "p").replace("-", "_")
 
-    pickle.dump(option_dict, open(os.path.join(clidir,f"__{pycmd}_options.pkl"), "wb"))
+    pickle.dump(option_dict, open(os.path.join(clidir,f"{pycmd}_options.pkl"), "wb"))
 
     length = 64
     tab = 4
@@ -762,22 +762,24 @@ def generate_module(usage, options, defaults):
         docflags2=docflags2
     )
     os.makedirs(clidir, exist_ok=True)
-    open(os.path.join(clidir, f"__{pycmd}__.py"), "w").write(init)
+    open(os.path.join(clidir, f"{pycmd}.py"), "w").write(init)
 
 def update_cli():
     # todo: have this export a file per module, so you end up with:
     # ----: clpy.gpp.runner, clpy.gpp.flags, clpy.gpp.run
+    clibasename = os.path.basename(clidir)
     modules = os.listdir(clidir)
-    modules = [m[:-3] for m in modules if m.endswith(".py")]
+    modules = [m[:-3] for m in modules if m.endswith(".py") and not m == "__init__.py"]
     for m in modules:
-        outlines = [f"from clpy.cli.{m} import {i}" for i in ["runner", "flags", "run"]]
-        with open(os.path.join(clpydir, m[2:-2]+".py"), "w") as cli_out:
+        outlines = [f"from clpy.{clibasename}.{m} import {i}" for i in ["runner", "flags", "run"]]
+        with open(os.path.join(clpydir, f"{m}.py"), "w") as cli_out:
             cli_out.write("\n".join(outlines))
 
 def __regenerate_all__():
+    clibasename = os.path.basename(clidir)
     modules = os.listdir(clidir)
-    modules = [m[:-3] for m in modules if m.endswith(".py")]
-    modules = [f"from clpy.cli.{m} import {m}\n{m}.runner().__regenerate__()" for m in modules]
+    modules = [m[:-3] for m in modules if m.endswith(".py") and not m == "__init__.py"]
+    modules = [f"from clpy.{clibasename}.{m} import {m}\n{m}.runner().__regenerate__()" for m in modules]
     modules = sorted(modules)
     for m in modules: exec(m)
 
