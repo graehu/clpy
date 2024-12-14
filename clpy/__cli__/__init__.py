@@ -46,7 +46,7 @@ class cli:
                 del(self.__flags[a])
         pass
 
-    def run(self, *in_args):
+    def run(self, *in_args, pipetext=None):
         args = [*self.__cmd]
         args.extend(self.__g_flags)
         for k in self.__flags:
@@ -66,7 +66,7 @@ class cli:
             print("Running: '"+" ".join(args)+"'")
 
         try:
-            return subprocess.run(args, capture_output=True, text=True, check=True)
+            return subprocess.run(args, input=pipetext, capture_output=True, text=True, check=True)
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Running '{' '.join(e.cmd)}' returned {e.returncode}"+"\n\n"+e.stderr) from e
 

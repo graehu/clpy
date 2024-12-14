@@ -44,9 +44,9 @@ class runner(cli.cli):
         super().add_flags(self, *in_flags)
         pass
 
-def run(*in_flags):
+def run(*in_flags, pipetext=None):
     cmd = runner(*in_flags)
-    return cmd.run()
+    return cmd.run(pipetext=pipetext)
 
 """
 
@@ -779,7 +779,7 @@ def __regenerate_all__():
     clibasename = os.path.basename(clidir)
     modules = os.listdir(clidir)
     modules = [m[:-3] for m in modules if m.endswith(".py") and not m == "__init__.py"]
-    modules = [f"from clpy.{clibasename}.{m} import {m}\n{m}.runner().__regenerate__()" for m in modules]
+    modules = [f"from clpy.{clibasename}.{m} import runner\nrunner().__regenerate__()" for m in modules]
     modules = sorted(modules)
     for m in modules: exec(m)
 
